@@ -20,20 +20,24 @@ import scala.collection.mutable.HashMap
 
 import java.io.{FileOutputStream, PrintStream}
 
-object RunLSA {
+class RunLSA extends Serializable {
   
-  def run( nbClusters:Int, top: Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession ) {
+
+  
+  def run( nbClusters:Int, top: Int, numTerms: Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession ) {
+
     val contentExtractor = new ContentExtractor()
     val paragraphs = contentExtractor.extractContent(sc)
     val doc = contentExtractor.extractRDD( paragraphs, sc )
-    val stopWords = org.apache.spark.ml.feature.StopWordsRemover.loadDefaultStopWords("french").toSet.asInstanceOf[ Set[String]]
+    val stopWords = contentExtractor.loadStopWords().toSet.asInstanceOf[ Set[String]]
     val (docDF, vocabulary) = contentExtractor.extractDataFrame(paragraphs, sc, spark)
-    val (termDocMatrix, termIds, docIds, idfs) = termDocumentMatrix( doc, stopWords, vocabulary.length, sc)
+    println("number of paragraphs: " + paragraphs.length)
+    println("vocabulary size: " + vocabulary.length)
+    val (termDocMatrix, termIds, docIds, idfs) = termDocumentMatrix( doc, stopWords, numTerms, sc)
     
     val mat = new org.apache.spark.mllib.linalg.distributed.RowMatrix(termDocMatrix)
     val svd = mat.computeSVD(nbClusters, computeU=true)
-
-    println("Singular values: " + svd.s)
+    saveEigenvalues( "lsaEigenValues.csv", svd)
     val topConceptTerms = topTermsInTopConcepts(svd, nbClusters, top, termIds)
     val topConceptDocs = topDocsInTopConcepts(svd, nbClusters, top, docIds)
     for ((terms, docs) <- topConceptTerms.zip(topConceptDocs)) {
@@ -58,6 +62,7 @@ object RunLSA {
     val docFreqs = documentFrequenciesDistributed(docTermFreqs.map(_._2), numTerms)
     println("Number of terms: " + docFreqs.size)
     saveDocFreqs("docfreqs.tsv", docFreqs)
+    val docFreqsMap = docFreqs.toMap
 
     val numDocs = docIds.size
 
@@ -72,7 +77,7 @@ object RunLSA {
     val vecs: org.apache.spark.rdd.RDD[org.apache.spark.mllib.linalg.Vector] = docTermFreqs.map(_._2).map(termFreqs => {
       val docTotalTerms = termFreqs.values.sum
       val termScores = termFreqs.filter {
-        case (term: String, freq) => bTermIds.contains(term)
+        case (term: String, freq) => ( bTermIds.contains(term) )
       }.map{
         case (term: String, freq) => (bTermIds(term), bIdfs(term) * termFreqs(term) / docTotalTerms)
       }.toSeq
@@ -121,6 +126,15 @@ object RunLSA {
     for ((doc, freq) <- docFreqs) {
       ps.println(s"$doc\t$freq")
     }
+    ps.close()
+  }
+  
+  def saveEigenvalues( path: String, svd: org.apache.spark.mllib.linalg.SingularValueDecomposition[org.apache.spark.mllib.linalg.distributed.RowMatrix, org.apache.spark.mllib.linalg.Matrix]) = {
+    val ps = new java.io.PrintStream(new java.io.FileOutputStream(path))
+    svd.s.toArray.map( value => {
+        ps.println( value)
+      }
+    )
     ps.close()
   }
   

@@ -232,7 +232,13 @@ class ContentExtractor extends Serializable {
   }
 
   def loadStopWords() = {
-    org.apache.spark.ml.feature.StopWordsRemover.loadDefaultStopWords("french")
+    val stopWords = org.apache.spark.ml.feature.StopWordsRemover.loadDefaultStopWords("french")
+    val pronounStopWords = Array("les","tous","sans","tout","point","quel", "cette","enfin", "quoi", "être","dont","cet","ici","encore","trop","leurs","moins","ils","quand","donc","quelle","quelque","comme","sous","fois","ainsi", "devant","deux","tant","déjà","jusqu","puis","prêt","allez","dès","encore","mille","dis","hui","entre","combien","malgré","assez","toute","cependant","tandis","tel","toutes","plutôt","avant","lorsque","hélas","pourquoi","oui","non","bien","juste","plus")
+    val verbalStopWords = Array("faut", "vient","crois","fait","laisser")
+    val nameStopWords = Array("pharnace", "xipharès","esther","mithridate","aman","arbate","monime","mardochée","assuérus")
+    val subjectStoWords= Array("nom", "seigneur","roi","reine","madame")
+    stopWords //union pronounStopWords union verbalStopWords union nameStopWords union subjectStoWords
+    
   }
   
    
@@ -247,7 +253,7 @@ class ContentExtractor extends Serializable {
     // remove stop words
     //
     val remover = new org.apache.spark.ml.feature.StopWordsRemover()
-      .setStopWords( org.apache.spark.ml.feature.StopWordsRemover.loadDefaultStopWords("french"))
+      .setStopWords( loadStopWords())
       .setInputCol("rawText")
       .setOutputCol("filtered")
 
@@ -259,7 +265,7 @@ class ContentExtractor extends Serializable {
     val countVectorizerModel = new org.apache.spark.ml.feature.CountVectorizer()
       .setInputCol("filtered")
       .setOutputCol("tf")
-      .setMinDF(2)
+      .setMinDF(1)
       .fit( filteredParagraphs )
       
     val termFrequencyParagraphs = countVectorizerModel.transform( filteredParagraphs)

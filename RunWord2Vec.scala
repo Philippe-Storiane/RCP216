@@ -15,21 +15,7 @@ import breeze.linalg.{squaredDistance, DenseVector => BreezeDenseVector, Vector}
 
 object RunWord2Vec {
   
-  def run( nbClusters:Int, top:Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession) = {
-    val contentExtractor = new ContentExtractor()
-    var paragraphs = contentExtractor.extractContent(sc)
-    var ( paragraphsDF, vocab )  = contentExtractor.extractDataFrame( paragraphs, sc, spark)
-    val sentence = paragraphsDF.select("filtered")
-    
-     val word2vec = new org.apache.spark.ml.feature.Word2Vec().setInputCol("filtered")
-     
-    
-    val word2vecModel = word2vec.fit( sentence )
-    val wordEmbeddings2 = word2vecModel.getVectors.collect().map( row => ( row.getString(0), row.getAs[org.apache.spark.ml.linalg.DenseVector](1))).toMap
-    
-    
-    
-    
+  def loadWordEmbeddings( sc: org.apache.spark.SparkContext) = {
     val wordEmbeddings = sc.textFile("frWac_non_lem_no_postag_no_phrase_200_skip_cut100.txt").map(
         line => {
           val parts = line.split("[\t,]")
@@ -38,7 +24,42 @@ object RunWord2Vec {
           ( word, org.apache.spark.ml.linalg.Vectors.dense( data ) )
         }
     ).collectAsMap()
-    val bWordEmbeddings = sc.broadcast( wordEmbeddings )
+    sc.broadcast( wordEmbeddings )
+  }
+  
+  
+  def searchClusterSize( minCluster: Int, maxCluster:Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession) = {
+    val contentExtractor = new ContentExtractor()
+    var paragraphs = contentExtractor.extractContent(sc)
+    var ( paragraphsDF, vocab )  = contentExtractor.extractDataFrame( paragraphs, sc, spark)
+    val sentence = paragraphsDF.select("filtered")
+    val sentence2vec = extractWord2Vec( sentence, sc, spark)    
+    val wsse = for ( nbClusters <- minCluster to maxCluster ) yield {
+      println("Computing Kmeans for " + nbClusters + " clusters")
+      val ( kmeansParagraphs, kmeansModel ) = computeKMeans(  sentence2vec, nbClusters,  sc, spark )
+      ( nbClusters, kmeansModel.computeCost(kmeansParagraphs))
+    }
+    saveWSSE("word2vec-wsse.csv", wsse.toArray)
+  }
+  
+  def analyzeCluster( nbCluster:Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession) = {
+    val contentExtractor = new ContentExtractor()
+    var paragraphs = contentExtractor.extractContent(sc)
+    var ( paragraphsDF, vocab )  = contentExtractor.extractDataFrame( paragraphs, sc, spark)
+    val sentence = paragraphsDF.select("filtered")
+    val sentence2vec = extractWord2Vec( sentence, sc, spark)
+    val ( kmeansParagraphs, kmeansModel ) = computeKMeans(  sentence2vec, nbCluster, sc, spark )
+    val bWordEmbeddings = loadWordEmbeddings( sc )
+    findSynonyms(kmeansModel, 10, vocab, bWordEmbeddings)
+  }
+  
+  
+  def extractWord2Vec(
+      sentence: org.apache.spark.sql.DataFrame, 
+      sc:org.apache.spark.SparkContext,
+      spark: org.apache.spark.sql.SparkSession) = {
+    val bWordEmbeddings = loadWordEmbeddings( sc )
+    val contentExtractor = new ContentExtractor()
     val vocabSize = 200
     val sentence2vec = sentence.map( row => {
         val text = row.getAs[scala.collection.mutable.WrappedArray[ String ]]("filtered")
@@ -64,9 +85,27 @@ object RunWord2Vec {
 
       }
     )(org.apache.spark.sql.catalyst.encoders.ExpressionEncoder(): org.apache.spark.sql.Encoder[ org.apache.spark.ml.linalg.Vector ])
+    sentence2vec
+
+  }
+  
+  def computeKMeans(
+      sentence2vec: org.apache.spark.sql.Dataset[org.apache.spark.ml.linalg.Vector], 
+      nbClusters:Int,
+      sc:org.apache.spark.SparkContext,
+      spark: org.apache.spark.sql.SparkSession ) = {
+     
+    // val word2vec = new org.apache.spark.ml.feature.Word2Vec().setInputCol("filtered")
      
     
-   val nbIterations = 100
+    // val word2vecModel = word2vec.fit( sentence )
+    // val wordEmbeddings2 = word2vecModel.getVectors.collect().map( row => ( row.getString(0), row.getAs[org.apache.spark.ml.linalg.DenseVector](1))).toMap
+    
+    
+    
+
+        
+    val nbIterations = 50
     val kmeans = new org.apache.spark.ml.clustering.KMeans()
       .setK( nbClusters )
       .setMaxIter( nbIterations)
@@ -74,25 +113,17 @@ object RunWord2Vec {
       .setInitMode("k-means||")
       .setPredictionCol("topic")
       
-    val kmeansModel = kmeans.fit( sentence2vec )
-    val kmeanParagraphs = kmeansModel.transform( sentence2vec )
-    
-    val WSSSE = kmeansModel.computeCost( kmeanParagraphs )
-    println(s"Within Set Sum of Squared Errors = $WSSSE")
-    
-    kmeansModel.clusterCenters.foreach( cluster => {
-      println("-")
-       word2vecModel.findSynonyms(cluster, top)
-         .foreach(synonym => print(
-           " %s (%5.3f),"
-           .format(
-               synonym.getString(0),
-               synonym.getDouble(1))
-          )
-       )
-      }
-    )
-    
+      val kmeansModel = kmeans.fit( sentence2vec )
+      val kmeanParagraphs = kmeansModel.transform( sentence2vec )
+ //     val l = findSynonyms(kmeansModel, top,  vocab, bWordEmbeddings )
+
+    //saveWSSE( "word2vec-wsse.csv", wsse.toArray)
+      ( kmeanParagraphs, kmeansModel)
+  }
+  
+  def findSynonyms( kmeansModel: org.apache.spark.ml.clustering.KMeansModel,
+      top:Int, vocab: Array[ String ],
+      bWordEmbeddings: org.apache.spark.broadcast.Broadcast[scala.collection.Map[String, org.apache.spark.ml.linalg.Vector]]) = {
     val realVocab = vocab.filter( word => bWordEmbeddings.value.get( word ) != None)
     kmeansModel.clusterCenters.foreach(  cluster =>
       {
@@ -118,6 +149,12 @@ object RunWord2Vec {
         )
       }
     )
-     
+  }
+  
+      
+  def saveWSSE( path: String, wsse : Array[ (Int, Double) ]) = {
+    val ps = new java.io.PrintStream(new java.io.FileOutputStream(path))
+    wsse.foreach( cost => ps.println(cost._1 + "\t"+ + cost._2 ))
+    ps.close()
   }
 }
