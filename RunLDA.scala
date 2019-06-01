@@ -15,6 +15,7 @@ object RunLDA {
     val (docDF, vocabulary) = contentExtractor.extractDataFrame(paragraphs, sc, spark)
     val ldaTrain = docDF.sample( false, 0.8)
     val ldaTest = docDF.except( ldaTrain )
+    val bWordEmbeddings = RunWord2Vec.loadWordEmbeddings(sc)
     val logit = for ( nbClusters <- minCluster to maxCluster ) yield {
       println("Computing LDA for " + nbClusters + " clusters")
       val ( ldaParagraphs, ldaModel) = computeLDA(  ldaTrain, nbClusters )
@@ -22,7 +23,15 @@ object RunLDA {
       val ldaPerplexity = ldaModel.logPerplexity( ldaTest)
       val ldaLikehood = ldaModel.logLikelihood( ldaTest)
       val kmeansWSSE = kmeansModel.computeCost( kmeansParagraphs)
-      ( nbClusters, ldaPerplexity, ldaLikehood, kmeansWSSE)
+      val topics = ldaModel.describeTopics(10)
+      val topicsDump = topics
+        .select("topic","termIndices")
+        .rdd
+        .map( row => ( row.getAs[Int](0), row.getAs[scala.collection.mutable.WrappedArray[ Int]](1).toSeq.toArray))
+        .collect()
+      val topicsWord2vec = CoherenceMeasure.word2vec(topicsDump, vocabulary, bWordEmbeddings)
+      val word2vec = topicsWord2vec.map( row => row._2).sum / nbClusters
+      ( nbClusters, ldaPerplexity, ldaLikehood, kmeansWSSE, word2vec)
     }
     saveLogit("lda-log.csv", logit.toArray)
   }
@@ -70,8 +79,8 @@ object RunLDA {
         .withColumn("topicWords", 
           wordsWithWeights(org.apache.spark.sql.functions.col("termIndices"), org.apache.spark.sql.functions.col("termWeights"))
         )
-    topics2.select("topicWords").show(false)
-
+      topics2.select("topicWords").show(false)
+      /*
       ldaModel.describeTopics(maxTermsPerTopic = 10).foreach( row => {        
         val topic = row.getAs[Int](0)
         val topicIndices = row.getAs[scala.collection.mutable.WrappedArray[Int]](1)
@@ -83,6 +92,7 @@ object RunLDA {
           }          
         }
        })
+       */
   }
    
   def run( k:Int, top: Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession ) {
@@ -107,10 +117,10 @@ object RunLDA {
     
   }
   
-  def saveLogit( path: String, wsse : Array[ (Int, Double, Double, Double) ]) = {
+  def saveLogit( path: String, wsse : Array[ (Int, Double, Double, Double, Double) ]) = {
     val ps = new java.io.PrintStream(new java.io.FileOutputStream(path))
-    ps.println("topic\tlogLikehood\tlogPerplexity\twsse")
-    wsse.foreach( cost => ps.println(cost._1 + "\t"+ + cost._2  +"\t" + cost._3 + "\t" + cost._4))
+    ps.println("topic\tlogLikehood\tlogPerplexity\twsse\tword2vec")
+    wsse.foreach( cost => ps.println(cost._1 + "\t"+ + cost._2  +"\t" + cost._3 + "\t" + cost._4 + "\t" + cost._5))
     ps.close()
   }
 }
