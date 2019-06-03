@@ -15,19 +15,6 @@ import breeze.linalg.{squaredDistance, DenseVector => BreezeDenseVector, Vector}
 
 object RunWord2Vec {
   
-  def loadWordEmbeddings( sc: org.apache.spark.SparkContext) = {
-    val wordEmbeddings = sc.textFile("frWac_non_lem_no_postag_no_phrase_200_skip_cut100.txt").map(
-        line => {
-          val parts = line.split("[\t,]")
-          val word = parts(0)
-          val data = parts.slice(1, parts.length).map(_.toDouble)
-          ( word, org.apache.spark.ml.linalg.Vectors.dense( data ) )
-        }
-    ).collectAsMap()
-    sc.broadcast( wordEmbeddings )
-  }
-  
-  
   def searchClusterSize( minCluster: Int, maxCluster:Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession) = {
     val contentExtractor = new ContentExtractor()
     var paragraphs = contentExtractor.extractContent(sc)
@@ -49,7 +36,7 @@ object RunWord2Vec {
     val sentence = paragraphsDF.select("filtered")
     val sentence2vec = extractWord2Vec( sentence, sc, spark)
     val ( kmeansParagraphs, kmeansModel ) = computeKMeans(  sentence2vec, nbCluster, sc, spark )
-    val bWordEmbeddings = loadWordEmbeddings( sc )
+    val bWordEmbeddings = CoherenceMeasure.loadWordEmbeddings( sc )
     findSynonyms(kmeansModel, 10, vocab, bWordEmbeddings)
   }
   
@@ -58,7 +45,7 @@ object RunWord2Vec {
       sentence: org.apache.spark.sql.DataFrame, 
       sc:org.apache.spark.SparkContext,
       spark: org.apache.spark.sql.SparkSession) = {
-    val bWordEmbeddings = loadWordEmbeddings( sc )
+    val bWordEmbeddings = CoherenceMeasure.loadWordEmbeddings( sc )
     val contentExtractor = new ContentExtractor()
     val vocabSize = 200
     val sentence2vec = sentence.map( row => {

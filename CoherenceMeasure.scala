@@ -1,6 +1,21 @@
 package com.rcp216.racineTopic
 
 object CoherenceMeasure {
+  
+  val ETA = 1.0 / 500
+  
+  def loadWordEmbeddings( sc: org.apache.spark.SparkContext) = {
+    val wordEmbeddings = sc.textFile("frWac_non_lem_no_postag_no_phrase_200_skip_cut100.txt").map(
+        line => {
+          val parts = line.split("[\t,]")
+          val word = parts(0)
+          val data = parts.slice(1, parts.length).map(_.toDouble)
+          ( word, org.apache.spark.ml.linalg.Vectors.dense( data ) )
+        }
+    ).collectAsMap()
+    sc.broadcast( wordEmbeddings )
+  }
+  
   def word2vec(
       topicTopWords: Array[ ( Int, Array[Int] ) ],
       vocab: Array[String],
@@ -45,27 +60,51 @@ object CoherenceMeasure {
 
     val wocCounts: breeze.linalg.CSCMatrix[Double] = breeze.linalg.CSCMatrix.zeros[Double]( vocabSize, vocabSize )
     
-    
-    docDF.select("tf").foreach( row => {
+    var index = 0
+    docDF.select("tf").collect().foreach( row => {
+        println("row No " + index)
         val  termIndices = row.getAs[org.apache.spark.ml.linalg.SparseVector](0)
         val termIds = termIndices.indices
         for ( termId <- termIds) {
+          //println("ident " +termId)
+          //wocCounts( termId, termId) += 1.0
           wocCounts( termId, termId) += 1.0
+          //println(wocCounts( termId, termId))
         }
         for ( List(w1,w2) <- termIds.toList.combinations(2)) {
+          //println("w1,w2 ", w1,w2)
           wocCounts( w1, w2) += 1.0
           wocCounts( w2, w1) += 1.0
+          //println(wocCounts( w1, w2))
         }
+        index += 1
       }
     )
-    for (r <- 0 until wocCounts.rows;
-         c <- r until wocCounts.cols ) {
-            val denom = wocCounts(c, c)
-            val joint = wocCounts(r, c) / denom
-            wocCounts(r, c) = joint
-        }
+    for( ( r,c) <- wocCounts.activeKeysIterator) {
+      val denom = wocCounts(c, c)
+      val joint = wocCounts(r, c) / denom
+      wocCounts(r, c) = joint
+    }
     wocCounts
 
   }
   
+  def uMass( topicTopWords: Array[ ( Int, Array[Int] ) ], corpusPMI: breeze.linalg.CSCMatrix[Double] )= {
+    var topicNumber = topicTopWords.length
+    val result = topicTopWords.map( topic => {
+        val topicIndex = topic._1
+        val termIndices = topic._2
+        val wordsLength = topic._2.length
+        var measure = 0.0
+        for ( List(w1,w2) <- termIndices.toList.combinations(2)) {
+          val pw1_w2 = java.lang.Math.log( corpusPMI( w1,w2) + ETA )
+          val pw1 = java.lang.Math.log( corpusPMI(w1, w1) )
+          val pw2 = java.lang.Math.log( corpusPMI(w2,w2) )
+          measure = measure + 2 * pw1_w2 - pw1 - pw2 
+        }
+        ( topicIndex, measure / wordsLength )
+      }
+    )
+    result
+  }
 }

@@ -1,6 +1,7 @@
 package com.rcp216.racineTopic
 
 import org.apache.spark.SparkContext
+import org.apache.spark.sql.functions._
 import org.apache.spark.sql.SparkSession
 
 import org.apache.spark.ml.clustering.LDA
@@ -15,7 +16,8 @@ object RunLDA {
     val (docDF, vocabulary) = contentExtractor.extractDataFrame(paragraphs, sc, spark)
     val ldaTrain = docDF.sample( false, 0.8)
     val ldaTest = docDF.except( ldaTrain )
-    val bWordEmbeddings = RunWord2Vec.loadWordEmbeddings(sc)
+    val bWordEmbeddings = CoherenceMeasure.loadWordEmbeddings(sc)
+    val corpusPMI = CoherenceMeasure.preprocessUMass( docDF, vocabulary.length )
     val logit = for ( nbClusters <- minCluster to maxCluster ) yield {
       println("Computing LDA for " + nbClusters + " clusters")
       val ( ldaParagraphs, ldaModel) = computeLDA(  ldaTrain, nbClusters )
@@ -23,17 +25,24 @@ object RunLDA {
       val ldaPerplexity = ldaModel.logPerplexity( ldaTest)
       val ldaLikehood = ldaModel.logLikelihood( ldaTest)
       val kmeansWSSE = kmeansModel.computeCost( kmeansParagraphs)
-      val topics = ldaModel.describeTopics(10)
+     val topicsDump = extractTopics( ldaModel, 10)
+     val topicsWord2vec = CoherenceMeasure.word2vec(topicsDump, vocabulary, bWordEmbeddings)
+      val word2vec = topicsWord2vec.map( _._2).sum / nbClusters
+      val uMass = CoherenceMeasure.uMass(topicsDump, corpusPMI).map(_._2).sum / nbClusters
+      ( nbClusters, ldaPerplexity, ldaLikehood, kmeansWSSE, word2vec, uMass)
+      
+    }
+    saveLogit("lda-log.csv", logit.toArray)
+  }
+  
+  def extractTopics( ldaModel: org.apache.spark.ml.clustering.LDAModel, top:Int) = {
+      val topics = ldaModel.describeTopics(top)
       val topicsDump = topics
         .select("topic","termIndices")
         .rdd
         .map( row => ( row.getAs[Int](0), row.getAs[scala.collection.mutable.WrappedArray[ Int]](1).toSeq.toArray))
         .collect()
-      val topicsWord2vec = CoherenceMeasure.word2vec(topicsDump, vocabulary, bWordEmbeddings)
-      val word2vec = topicsWord2vec.map( row => row._2).sum / nbClusters
-      ( nbClusters, ldaPerplexity, ldaLikehood, kmeansWSSE, word2vec)
-    }
-    saveLogit("lda-log.csv", logit.toArray)
+      topicsDump
   }
   
   
@@ -93,34 +102,42 @@ object RunLDA {
         }
        })
        */
+      val topicDistribution = ldaParagraphs.select("topicDistribution").withColumn("id",monotonicallyIncreasingId)
+      val topicMap = topicDistribution.collect().map( row => {
+          val topic = row.getAs[org.apache.spark.ml.linalg.DenseVector]("topicDistribution").toArray
+          val id = row.getAs[Long]("id")
+          val topicDesc = topic.zipWithIndex.sortWith( _._1 > _._1).take(4).map(_.swap)
+          ( id, topicDesc )
+        }
+      )
+      saveTopicMap("lda-topicMap.csv", topicMap)
+      
   }
    
-  def run( k:Int, top: Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession ) {
-    var contentExtractor = new ContentExtractor()
-    var paragraphs = contentExtractor.extractContent(sc)
-    val (docDF, vocabulary) = contentExtractor.extractDataFrame(paragraphs, sc, spark)
-    val lda = new org.apache.spark.ml.clustering.LDA()
-      .setK( 10 )
-      .setMaxIter(500)
-      .setFeaturesCol("tf")
-    val ldaModel = lda.fit( docDF )
-    val ldaParagraphs = ldaModel.transform( docDF )
-    
-    val logLikehood = ldaModel.logLikelihood( docDF )
-    val logPerplexity = ldaModel.logPerplexity( docDF )
-    
-    val topics = ldaModel.describeTopics( 3 )
-    topics.show( false )
-    
-    ldaModel.save( "ldaModel")
-    val ldaDistributedModel = org.apache.spark.ml.clustering.DistributedLDAModel.load("ldaModel")
-    
+  def saveTopicMap( path: String, topicMap: Array[ ( Long, Array[( Int, Double)])]) = {
+   val ps = new java.io.PrintStream(new java.io.FileOutputStream(path))
+   val topicLength = topicMap(0)._2.length
+    ps.print("id")
+    for( index <- 1 to topicLength) {
+      ps.print("\ttopic_index_"+ index + "\ttopic_weight_" + index)
+    }
+    ps.println()
+    topicMap.foreach( row => {
+      ps.print( row._1 )
+      for( index <- 0 to (topicLength - 1)) {
+        ps.print("\t" + row._2(index)._1 + "\t" + row._2( index )._2)
+      }
+      ps.println()
+      }    
+    )
+    ps.close()    
   }
   
-  def saveLogit( path: String, wsse : Array[ (Int, Double, Double, Double, Double) ]) = {
+  
+  def saveLogit( path: String, wsse : Array[ (Int, Double, Double, Double, Double, Double) ]) = {
     val ps = new java.io.PrintStream(new java.io.FileOutputStream(path))
-    ps.println("topic\tlogLikehood\tlogPerplexity\twsse\tword2vec")
-    wsse.foreach( cost => ps.println(cost._1 + "\t"+ + cost._2  +"\t" + cost._3 + "\t" + cost._4 + "\t" + cost._5))
+    ps.println("topic\tlogLikehood\tlogPerplexity\twsse\tword2vect\tUMass")
+    wsse.foreach( row => ps.println( row._1 + "\t" + row._2 + "\t" + row._3 + "\t" + row._4 + "\t" + row._5 + "\t" + row._6))
     ps.close()
   }
 }
