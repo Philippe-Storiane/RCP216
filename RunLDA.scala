@@ -106,7 +106,7 @@ object RunLDA {
       val topicMap = topicDistribution.collect().map( row => {
           val topic = row.getAs[org.apache.spark.ml.linalg.DenseVector]("topicDistribution").toArray
           val id = row.getAs[Long]("id")
-          val topicDesc = topic.zipWithIndex.sortWith( _._1 > _._1).take(4).map(_.swap)
+          val topicDesc = topic.zipWithIndex.sortWith( _._1 > _._1).take(5).map(_.swap)
           ( id, topicDesc )
         }
       )
