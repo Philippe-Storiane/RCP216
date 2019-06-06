@@ -8,7 +8,7 @@ import org.apache.spark.ml.clustering.LDA
 import org.apache.spark.ml.clustering.DistributedLDAModel
 import org.apache.spark.ml.clustering.KMeansParams
 
-object RunLDA {
+class RunLDA extends Serializable {
   
   def searchClusterSize( minCluster: Int, maxCluster:Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession) = {
     var contentExtractor = new ContentExtractor()
@@ -19,16 +19,16 @@ object RunLDA {
     val bWordEmbeddings = CoherenceMeasure.loadWordEmbeddings(sc)
     val corpusPMI = CoherenceMeasure.preprocessUMass( docDF, vocabulary.length )
     val logit = for ( nbClusters <- minCluster to maxCluster ) yield {
-      println("Computing LDA for " + nbClusters + " clusters")
-      val ( ldaParagraphs, ldaModel) = computeLDA(  ldaTrain, nbClusters )
-      val ( kmeansParagraphs, kmeansModel ) = computeKMeans( ldaParagraphs, nbClusters)
-      val ldaPerplexity = ldaModel.logPerplexity( ldaTest)
-      val ldaLikehood = ldaModel.logLikelihood( ldaTest)
-      val kmeansWSSE = kmeansModel.computeCost( kmeansParagraphs)
-     val topicsDump = extractTopics( ldaModel, 10)
-     val topicsWord2vec = CoherenceMeasure.word2vec(topicsDump, vocabulary, bWordEmbeddings)
-      val word2vec = topicsWord2vec.map( _._2).sum / nbClusters
-      val uMass = CoherenceMeasure.uMass(topicsDump, corpusPMI).map(_._2).sum / nbClusters
+    println("Computing LDA for " + nbClusters + " clusters")
+    val ( ldaParagraphs, ldaModel) = computeLDA(  ldaTrain, nbClusters )
+    val ( kmeansParagraphs, kmeansModel ) = computeKMeans( ldaParagraphs, nbClusters)
+    val ldaPerplexity = ldaModel.logPerplexity( ldaTest)
+    val ldaLikehood = ldaModel.logLikelihood( ldaTest)
+    val kmeansWSSE = kmeansModel.computeCost( kmeansParagraphs)
+    val topicsDump = extractTopics( ldaModel, 10)
+    val topicsWord2vec = CoherenceMeasure.word2vec(topicsDump, vocabulary, bWordEmbeddings)
+    val word2vec = topicsWord2vec.map( _._2).sum / nbClusters
+    val uMass = CoherenceMeasure.uMass(topicsDump, corpusPMI).map(_._2).sum / nbClusters
       ( nbClusters, ldaPerplexity, ldaLikehood, kmeansWSSE, word2vec, uMass)
       
     }
@@ -89,20 +89,8 @@ object RunLDA {
           wordsWithWeights(org.apache.spark.sql.functions.col("termIndices"), org.apache.spark.sql.functions.col("termWeights"))
         )
       topics2.select("topicWords").show(false)
-      /*
-      ldaModel.describeTopics(maxTermsPerTopic = 10).foreach( row => {        
-        val topic = row.getAs[Int](0)
-        val topicIndices = row.getAs[scala.collection.mutable.WrappedArray[Int]](1)
-        val topicWeights = row.getAs[scala.collection.mutable.WrappedArray[Double]](2)
-        println("Topic " + topic )
-        topicIndices.zipWithIndex.foreach{
-          case ( topicId, topicIndex) => {
-            print( "( " + vocab(topicId) + " " + topicWeights( topicIndex) + ")")
-          }          
-        }
-       })
-       */
-      val topicDistribution = ldaParagraphs.select("topicDistribution").withColumn("id",monotonicallyIncreasingId)
+
+      val topicDistribution = ldaParagraphs.select("topicDistribution").withColumn("id",org.apache.spark.sql.functions.monotonicallyIncreasingId)
       val topicMap = topicDistribution.collect().map( row => {
           val topic = row.getAs[org.apache.spark.ml.linalg.DenseVector]("topicDistribution").toArray
           val id = row.getAs[Long]("id")
@@ -112,6 +100,15 @@ object RunLDA {
       )
       saveTopicMap("lda-topicMap.csv", topicMap)
       
+      val topicWordsDF = ldaModel.describeTopics( 10 )
+      val topicWords = topicWordsDF.collect().map( row => {
+          val topic = row.getAs[Int]("topic")
+          val termIndices = row.getAs[scala.collection.mutable.WrappedArray[Int]]("termIndices")
+          val termWeights = row.getAs[scala.collection.mutable.WrappedArray[Double]]("termWeights")
+          val wordDesc = termIndices.map( word => vocab( word)).zip(termWeights)
+          ( topic, wordDesc)
+        }
+      )
   }
    
   def saveTopicMap( path: String, topicMap: Array[ ( Long, Array[( Int, Double)])]) = {
@@ -139,5 +136,29 @@ object RunLDA {
     ps.println("topic\tlogLikehood\tlogPerplexity\twsse\tword2vect\tUMass")
     wsse.foreach( row => ps.println( row._1 + "\t" + row._2 + "\t" + row._3 + "\t" + row._4 + "\t" + row._5 + "\t" + row._6))
     ps.close()
+  }
+  
+  def saveTopicWords(
+      path:String,
+      topicWords: Array[ ( Int, scala.collection.mutable.WrappedArray[ (String, Double)])]) = {
+    val ps = new java.io.PrintStream(new java.io.FileOutputStream(path))
+    val nbTerms = topicWords(0)._2.length
+    ps.print("topic_id")
+    for( index <- 1 to nbTerms) {
+      ps.print("\tterm_name_"+ index + "\tterm_weight_" + index)
+    }
+    ps.println()
+    topicWords.foreach( row => {
+      val topic_id = row._1
+      ps.print( topic_id )
+      for( index <- 0 to (nbTerms - 1)) {
+        val term_name = row._2( index)._1 
+        val term_weight = row._2( index)._2
+        ps.print("\t\"" + term_name + "\"\t" + term_weight)
+      }
+      ps.println()
+      }    
+    )
+    ps.close()     
   }
 }
