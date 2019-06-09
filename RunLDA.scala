@@ -8,7 +8,7 @@ import org.apache.spark.ml.clustering.LDA
 import org.apache.spark.ml.clustering.DistributedLDAModel
 import org.apache.spark.ml.clustering.KMeansParams
 
-class RunLDA extends Serializable {
+class RunLDA extends  {
   
   def searchClusterSize( minCluster: Int, maxCluster:Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession) = {
     var contentExtractor = new ContentExtractor()
