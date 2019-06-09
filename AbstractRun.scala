@@ -2,9 +2,10 @@ package com.rcp216.racineTopic
 
 abstract class AbstractRun extends Serializable{
   
-   def searchClusterSize(minCluster: Int, maxCluster:Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession) 
   
-   def analyzeCluster( ocDF: org.apache.spark.sql.DataFrame, nbClusters: Int)
+  def searchClusterSize(minCluster: Int, maxCluster:Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession) 
+  
+   def analyzeCluster( nbCluster:Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession)
    
    def saveTopicMap( path: String, topicMap: Array[ ( Long, Array[( Int, Double)])]) = {
    val ps = new java.io.PrintStream(new java.io.FileOutputStream(path))

@@ -20,11 +20,14 @@ import scala.collection.mutable.HashMap
 
 import java.io.{FileOutputStream, PrintStream}
 
-class RunLSA extends Serializable {
+class RunLSA extends AbstractRun {
   
-
+ 
+  def searchClusterSize(minCluster: Int, maxCluster:Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession) = {
+    
+  }
   
-  def run( nbClusters:Int, top: Int, numTerms: Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession ) {
+  def analyzeCluster( nbClusters:Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession) = {
 
     val contentExtractor = new ContentExtractor()
     val paragraphs = contentExtractor.extractContent(sc)
@@ -33,18 +36,28 @@ class RunLSA extends Serializable {
     val (docDF, vocabulary) = contentExtractor.extractDataFrame(paragraphs, sc, spark)
     println("number of paragraphs: " + paragraphs.length)
     println("vocabulary size: " + vocabulary.length)
-    val (termDocMatrix, termIds, docIds, idfs) = termDocumentMatrix( doc, stopWords, numTerms, sc)
+    val (termDocMatrix, termIds, docIds, idfs) = termDocumentMatrix( doc, stopWords, vocabulary.length, sc)
     
     val mat = new org.apache.spark.mllib.linalg.distributed.RowMatrix(termDocMatrix)
     val svd = mat.computeSVD(nbClusters, computeU=true)
     saveEigenvalues( "lsaEigenValues.csv", svd)
-    val topConceptTerms = topTermsInTopConcepts(svd, nbClusters, top, termIds)
-    val topConceptDocs = topDocsInTopConcepts(svd, nbClusters, top, docIds)
-    for ((terms, docs) <- topConceptTerms.zip(topConceptDocs)) {
-      println("Concept terms: " + terms.map(_._1).mkString(", "))
-      println("Concept docs: " + docs.map(_._1).mkString(", "))
-      println()
+    
+    findTopicWords(svd, nbClusters, 10, termIds)
+    // val topConceptDocs = topDocsInTopConcepts(svd, nbClusters, 10, docIds)
+  }
+  
+  def findTopicWords( svd:org.apache.spark.mllib.linalg.SingularValueDecomposition[org.apache.spark.mllib.linalg.distributed.RowMatrix, org.apache.spark.mllib.linalg.Matrix],
+      nbClusters:Int,
+      top:Int, termIds:scala.collection.Map[Int, String]) = {
+    val topConceptTerms = topTermsInTopConcepts(svd, nbClusters, 10, termIds)
+    val topicWords = topConceptTerms.zipWithIndex.toArray.map{
+      case ( seq, index ) => {
+        val arr = seq.toArray
+        val synonyms:scala.collection.mutable.WrappedArray[(String, Double)] = arr
+        (index, synonyms)
+      }
     }
+    saveTopicWords("lsa-topicWords.csv", topicWords)
   }
   
   def termDocumentMatrix(docs: org.apache.spark.rdd.RDD[(String, Array[String])], stopWords: Set[String], numTerms: Int,

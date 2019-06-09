@@ -8,7 +8,7 @@ import org.apache.spark.ml.clustering.LDA
 import org.apache.spark.ml.clustering.DistributedLDAModel
 import org.apache.spark.ml.clustering.KMeansParams
 
-class RunLDA extends  {
+class RunLDA extends AbstractRun {
   
   def searchClusterSize( minCluster: Int, maxCluster:Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession) = {
     var contentExtractor = new ContentExtractor()
@@ -76,9 +76,7 @@ class RunLDA extends  {
       var ( paragraphsDF, vocab )  = contentExtractor.extractDataFrame( paragraphs, sc, spark)
     
       val ( ldaParagraphs, ldaModel ) = computeLDA(  paragraphsDF, nbCluster )
-      var topics = ldaModel.describeTopics(10)
-      val topicIndices:org.apache.spark.sql.DataFrame = ldaModel.describeTopics(maxTermsPerTopic = 10)
-
+ 
       val wordsWithWeights = org.apache.spark.sql.functions.udf( (x : scala.collection.mutable.WrappedArray[Int],
                              y : scala.collection.mutable.WrappedArray[Double]) => 
         { x.map(i => vocab(i)).zip(y)}
@@ -109,27 +107,11 @@ class RunLDA extends  {
           ( topic, wordDesc)
         }
       )
+      
+      saveTopicWords("lda-topicWords.csv", topicWords)
   }
    
-  def saveTopicMap( path: String, topicMap: Array[ ( Long, Array[( Int, Double)])]) = {
-   val ps = new java.io.PrintStream(new java.io.FileOutputStream(path))
-   val topicLength = topicMap(0)._2.length
-    ps.print("id")
-    for( index <- 1 to topicLength) {
-      ps.print("\ttopic_index_"+ index + "\ttopic_weight_" + index)
-    }
-    ps.println()
-    topicMap.foreach( row => {
-      ps.print( row._1 )
-      for( index <- 0 to (topicLength - 1)) {
-        ps.print("\t" + row._2(index)._1 + "\t" + row._2( index )._2)
-      }
-      ps.println()
-      }    
-    )
-    ps.close()    
-  }
-  
+ 
   
   def saveLogit( path: String, wsse : Array[ (Int, Double, Double, Double, Double, Double) ]) = {
     val ps = new java.io.PrintStream(new java.io.FileOutputStream(path))
@@ -138,27 +120,5 @@ class RunLDA extends  {
     ps.close()
   }
   
-  def saveTopicWords(
-      path:String,
-      topicWords: Array[ ( Int, scala.collection.mutable.WrappedArray[ (String, Double)])]) = {
-    val ps = new java.io.PrintStream(new java.io.FileOutputStream(path))
-    val nbTerms = topicWords(0)._2.length
-    ps.print("topic_id")
-    for( index <- 1 to nbTerms) {
-      ps.print("\tterm_name_"+ index + "\tterm_weight_" + index)
-    }
-    ps.println()
-    topicWords.foreach( row => {
-      val topic_id = row._1
-      ps.print( topic_id )
-      for( index <- 0 to (nbTerms - 1)) {
-        val term_name = row._2( index)._1 
-        val term_weight = row._2( index)._2
-        ps.print("\t\"" + term_name + "\"\t" + term_weight)
-      }
-      ps.println()
-      }    
-    )
-    ps.close()     
-  }
+
 }
