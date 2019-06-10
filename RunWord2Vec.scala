@@ -23,16 +23,23 @@ class RunWord2Vec extends AbstractRun {
     val bWordEmbeddings = CoherenceMeasure.loadWordEmbeddings(sc)
     val sentence2vec = extractWord2Vec( sentence, vocab, bWordEmbeddings, sc, spark)
     val corpusPMI = CoherenceMeasure.preprocessUMass( paragraphsDF, vocab.length )
-    val wsse = for ( nbClusters <- minCluster to maxCluster ) yield {
+    val measures = for ( nbClusters <- minCluster to maxCluster ) yield {
       println("Computing Kmeans for " + nbClusters + " clusters")
       val ( kmeansParagraphs, kmeansModel ) = computeKMeans(  sentence2vec, nbClusters,  sc, spark )
+      val topicWord = findTopicWords( kmeansModel, 10, vocab, bWordEmbeddings)
+      val topicsDump = topicWord.map{
+        case ( topicIndex, words) => {
+          val wordIndex = words.map( _._1).toArray
+          ( topicIndex, wordIndex)
+        }
+      }
       val wsse = kmeansModel.computeCost(kmeansParagraphs)
-      //val topicsWord2vec = CoherenceMeasure.word2vec(topicsDump, vocab, bWordEmbeddings)
-      //val word2vec = topicsWord2vec.map( _._2).sum / nbClusters
-      //val uMass = CoherenceMeasure.uMass(topicsDump, corpusPMI).map(_._2).sum / nbClusters
-      ( nbClusters, kmeansModel.computeCost(kmeansParagraphs))//, word2vec, uMass)
+      val topicsWord2vec = CoherenceMeasure.word2vec(topicsDump, vocab, bWordEmbeddings)
+      val word2vec = topicsWord2vec.map( _._2).sum / nbClusters
+      val uMass = CoherenceMeasure.uMass(topicsDump, corpusPMI).map(_._2).sum / nbClusters
+      ( nbClusters, wsse, word2vec, uMass)
     }
-    saveMeasures("word2vec-wsse.csv", wsse.toArray)
+    saveMeasures("word2vec-measures-tst.csv", measures.toArray)
   }
   
   def analyzeCluster( nbCluster:Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession) = {
@@ -44,7 +51,8 @@ class RunWord2Vec extends AbstractRun {
     val sentence2vec = extractWord2Vec( sentence, vocab, bWordEmbeddings, sc, spark)
     val ( kmeansParagraphs, kmeansModel ) = computeKMeans(  sentence2vec, nbCluster, sc, spark )
     
-    findTopicWords(kmeansModel, 10, vocab, bWordEmbeddings)
+    val topicWords = findTopicWords(kmeansModel, 10, vocab, bWordEmbeddings)
+    saveTopicWords("word2vec-topicWords-tst.csv", topicWords)
     findTopicMap( kmeansModel, 5, sentence2vec)
   }
   
@@ -69,7 +77,7 @@ class RunWord2Vec extends AbstractRun {
         (index, clustersDistTop)
       }
     )
-    saveTopicMap("word2vec-topicMap.csv", topicMap)
+    saveTopicMap("word2vec-topicMap-tst.csv", topicMap)
     
   }
   
@@ -147,22 +155,22 @@ class RunWord2Vec extends AbstractRun {
   def findTopicWords( kmeansModel: org.apache.spark.ml.clustering.KMeansModel,
       top:Int, vocab: Array[ String ],
       bWordEmbeddings: org.apache.spark.broadcast.Broadcast[scala.collection.Map[String, org.apache.spark.ml.linalg.Vector]]) = {
-    val realVocab = vocab.filter( word => bWordEmbeddings.value.get( word ) != None)
+    val realVocab = vocab.zipWithIndex.filter{ case ( word, index)  => bWordEmbeddings.value.get( word ) != None}
     val topicWords = kmeansModel.clusterCenters.zipWithIndex.map{  case ( cluster, index ) =>
       {
         println("")
         val bCluster = breeze.linalg.DenseVector( cluster.toArray )
         val bClusterLength = breeze.linalg.norm( bCluster )
         // val ordering = Ordering.by[(String, Double( data => data._2)
-        val words = realVocab.map( word =>
+        val words = realVocab.map{ case (word, index) =>
           {
             val vectr =  bWordEmbeddings.value.get( word )
             val bVectr = new breeze.linalg.DenseVector[ Double ] (bWordEmbeddings.value( word ).toArray)
             val dist = ( bCluster dot bVectr ) / ( bClusterLength * breeze.linalg.norm( bVectr ))
-            ( word, dist )  
+            ( index, word, dist )  
           }
-        )
-        val synonyms:scala.collection.mutable.WrappedArray[(String, Double)] = words.sortWith( _._2 > _._2).take(top)
+        }
+        val synonyms:scala.collection.mutable.WrappedArray[(Int, String, Double)] = words.sortWith( _._3 > _._3).take(top)
         /*
          .foreach(synonym => print(
            " %s (%5.3f),"
@@ -175,13 +183,13 @@ class RunWord2Vec extends AbstractRun {
         ( index, synonyms)
       }
     }
-    saveTopicWords("word2vec-topicWords.csv", topicWords)
+    topicWords
     
   }
   
  
   
-  def saveMeasures( path: String, measures : Array[ (Int, Double/*, Double, Double*/) ]) = {
+  def saveMeasures( path: String, measures : Array[ (Int, Double, Double, Double) ]) = {
     val ps = new java.io.PrintStream(new java.io.FileOutputStream(path))
     ps.println("topic\twsse\tword2vect\tUMass")
     measures.foreach( cost => ps.println(cost._1 + "\t"+ + cost._2 +"\t" + cost._3 + "\t" + cost._4 ))

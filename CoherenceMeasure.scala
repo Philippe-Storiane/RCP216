@@ -5,7 +5,9 @@ object CoherenceMeasure {
   val ETA = 1.0 / 500
   
   def loadWordEmbeddings( sc: org.apache.spark.SparkContext) = {
-    val wordEmbeddings = sc.textFile("frWac_non_lem_no_postag_no_phrase_200_skip_cut100.txt").map(
+    // val wordEmbeddingsFile = "frWac_no_postag_no_phrase_500_skip_cut100.txt"
+    val wordEmbeddingsFile = "frWac_non_lem_no_postag_no_phrase_200_skip_cut100.txt"
+    val wordEmbeddings = sc.textFile( wordEmbeddingsFile ).map(
         line => {
           val parts = line.split("[\t,]")
           val word = parts(0)

@@ -7,6 +7,7 @@ import codecs
 
 os.chdir("C:/users/a179415/OneDrive - Alliance/Personal/CNAM/RCP 216")
 
+FILE_NAME="frWac_no_postag_no_phrase_500_skip_cut100.bin"
 output_file_name = FILE_NAME + ".txt"
 
 

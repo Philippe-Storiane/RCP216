@@ -18,21 +18,21 @@ class RunLDA extends AbstractRun {
     val ldaTest = docDF.except( ldaTrain )
     val bWordEmbeddings = CoherenceMeasure.loadWordEmbeddings(sc)
     val corpusPMI = CoherenceMeasure.preprocessUMass( docDF, vocabulary.length )
-    val logit = for ( nbClusters <- minCluster to maxCluster ) yield {
-    println("Computing LDA for " + nbClusters + " clusters")
-    val ( ldaParagraphs, ldaModel) = computeLDA(  ldaTrain, nbClusters )
-    val ( kmeansParagraphs, kmeansModel ) = computeKMeans( ldaParagraphs, nbClusters)
-    val ldaPerplexity = ldaModel.logPerplexity( ldaTest)
-    val ldaLikehood = ldaModel.logLikelihood( ldaTest)
-    val kmeansWSSE = kmeansModel.computeCost( kmeansParagraphs)
-    val topicsDump = extractTopics( ldaModel, 10)
-    val topicsWord2vec = CoherenceMeasure.word2vec(topicsDump, vocabulary, bWordEmbeddings)
-    val word2vec = topicsWord2vec.map( _._2).sum / nbClusters
-    val uMass = CoherenceMeasure.uMass(topicsDump, corpusPMI).map(_._2).sum / nbClusters
+    val measures = for ( nbClusters <- minCluster to maxCluster ) yield {
+      println("Computing LDA for " + nbClusters + " clusters")
+      val ( ldaParagraphs, ldaModel) = computeLDA(  ldaTrain, nbClusters )
+      val ( kmeansParagraphs, kmeansModel ) = computeKMeans( ldaParagraphs, nbClusters)
+      val ldaPerplexity = ldaModel.logPerplexity( ldaTest)
+      val ldaLikehood = ldaModel.logLikelihood( ldaTest)
+      val kmeansWSSE = kmeansModel.computeCost( kmeansParagraphs)
+      val topicsDump = extractTopics( ldaModel, 10)
+      val topicsWord2vec = CoherenceMeasure.word2vec(topicsDump, vocabulary, bWordEmbeddings)
+      val word2vec = topicsWord2vec.map( _._2).sum / nbClusters
+      val uMass = CoherenceMeasure.uMass(topicsDump, corpusPMI).map(_._2).sum / nbClusters
       ( nbClusters, ldaPerplexity, ldaLikehood, kmeansWSSE, word2vec, uMass)
       
     }
-    saveMeasures("lda-log.csv", logit.toArray)
+    saveMeasures("lda-measures-tst.csv", measures.toArray)
   }
   
   def extractTopics( ldaModel: org.apache.spark.ml.clustering.LDAModel, top:Int) = {
@@ -96,19 +96,19 @@ class RunLDA extends AbstractRun {
           ( id, topicDesc )
         }
       )
-      saveTopicMap("lda-topicMap.csv", topicMap)
+      saveTopicMap("lda-topicMap-tst.csv", topicMap)
       
       val topicWordsDF = ldaModel.describeTopics( 10 )
       val topicWords = topicWordsDF.collect().map( row => {
           val topic = row.getAs[Int]("topic")
           val termIndices = row.getAs[scala.collection.mutable.WrappedArray[Int]]("termIndices")
           val termWeights = row.getAs[scala.collection.mutable.WrappedArray[Double]]("termWeights")
-          val wordDesc = termIndices.map( word => vocab( word)).zip(termWeights)
+          val wordDesc = termIndices.zipWithIndex.map{ case( word, index) => (word, vocab( word), termWeights( index))}
           ( topic, wordDesc)
         }
       )
       
-      saveTopicWords("lda-topicWords.csv", topicWords)
+      saveTopicWords("lda-topicWords-tst.csv", topicWords)
   }
    
  

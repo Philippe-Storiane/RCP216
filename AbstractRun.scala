@@ -28,7 +28,7 @@ abstract class AbstractRun extends Serializable{
   
   def saveTopicWords(
       path:String,
-      topicWords: Array[ ( Int, scala.collection.mutable.WrappedArray[ (String, Double)])]) = {
+      topicWords: Array[ ( Int, scala.collection.mutable.WrappedArray[ (Int,String, Double)])]) = {
     val ps = new java.io.PrintStream(new java.io.FileOutputStream(path))
     val nbTerms = topicWords(0)._2.length
     ps.print("topic_id")
@@ -40,8 +40,8 @@ abstract class AbstractRun extends Serializable{
       val topic_id = row._1
       ps.print( topic_id )
       for( index <- 0 to (nbTerms - 1)) {
-        val term_name = row._2( index)._1 
-        val term_weight = row._2( index)._2
+        val term_name = row._2( index)._2 
+        val term_weight = row._2( index)._3
         ps.print("\t\"" + term_name + "\"\t" + term_weight)
       }
       ps.println()

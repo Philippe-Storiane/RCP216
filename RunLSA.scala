@@ -24,6 +24,36 @@ class RunLSA extends AbstractRun {
   
  
   def searchClusterSize(minCluster: Int, maxCluster:Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession) = {
+    val contentExtractor = new ContentExtractor()
+    val paragraphs = contentExtractor.extractContent(sc)
+    val doc = contentExtractor.extractRDD( paragraphs, sc )
+    val stopWords = contentExtractor.loadStopWords().toSet.asInstanceOf[ Set[String]]
+    val (docDF, vocabulary) = contentExtractor.extractDataFrame(paragraphs, sc, spark)
+    println("number of paragraphs: " + paragraphs.length)
+    println("vocabulary size: " + vocabulary.length)
+    val (termDocMatrix, termIds, docIds, idfs) = termDocumentMatrix( doc, stopWords, vocabulary.length, sc)
+    
+    val bWordEmbeddings = CoherenceMeasure.loadWordEmbeddings(sc)
+    val corpusPMI = CoherenceMeasure.preprocessUMass( docDF, vocabulary.length )
+    
+    val mat = new org.apache.spark.mllib.linalg.distributed.RowMatrix(termDocMatrix)
+    val svd = mat.computeSVD(maxCluster, computeU=true)
+    val measures = for ( nbCluster <- minCluster to maxCluster ) yield {
+      val topicWords = findTopicWords(svd, nbCluster, 10, termIds)
+      val topicsDump = topicWords.map{
+        case ( topicIndex, words) => {
+          val wordIndex = words.map( _._1).toArray
+          ( topicIndex, wordIndex)
+        }
+      }
+      val topicsWord2vec = CoherenceMeasure.word2vec(topicsDump, vocabulary, bWordEmbeddings)
+      val word2vec = topicsWord2vec.map( _._2).sum / nbCluster
+      val uMass = CoherenceMeasure.uMass(topicsDump, corpusPMI).map(_._2).sum / nbCluster
+
+      (nbCluster, word2vec, uMass)
+    }
+    saveMeasures( "lsa-measures-tst.csv", measures.toArray)
+    saveEigenvalues( "lsa-eigenValues.csv", svd)
     
   }
   
@@ -41,7 +71,8 @@ class RunLSA extends AbstractRun {
     val svd = mat.computeSVD(nbClusters, computeU=true)
     saveEigenvalues( "lsa-eigenValues.csv", svd)
     
-    findTopicWords(svd, nbClusters, 10, termIds)
+    val topicWords = findTopicWords(svd, nbClusters, 10, termIds)
+    saveTopicWords( "lsa-topicWords-tst.csv", topicWords)
     findTopicMap( svd, 10, termDocMatrix)
     // val topConceptDocs = topDocsInTopConcepts(svd, nbClusters, 10, docIds)
   }
@@ -53,11 +84,11 @@ class RunLSA extends AbstractRun {
     val topicWords = topConceptTerms.zipWithIndex.toArray.map{
       case ( seq, index ) => {
         val arr = seq.toArray
-        val synonyms:scala.collection.mutable.WrappedArray[(String, Double)] = arr
+        val synonyms:scala.collection.mutable.WrappedArray[(Int, String, Double)] = arr
         (index, synonyms)
       }
     }
-    saveTopicWords("lsa-topicWords.csv", topicWords)
+    topicWords
   }
   
   def findTopicMap( svd:org.apache.spark.mllib.linalg.SingularValueDecomposition[org.apache.spark.mllib.linalg.distributed.RowMatrix, org.apache.spark.mllib.linalg.Matrix],
@@ -75,7 +106,7 @@ class RunLSA extends AbstractRun {
         (index.toLong, topWeights.toArray)
       }
     }.collect()
-    saveTopicMap("lsa-topicMap.csv", topicMap)
+    saveTopicMap("lsa-topicMap-tst.csv", topicMap)
   }
     
   def termDocumentMatrix(docs: org.apache.spark.rdd.RDD[(String, Array[String])], stopWords: Set[String], numTerms: Int,
@@ -169,10 +200,12 @@ class RunLSA extends AbstractRun {
     ps.close()
   }
   
-    def topTermsInTopConcepts(svd: org.apache.spark.mllib.linalg.SingularValueDecomposition[org.apache.spark.mllib.linalg.distributed.RowMatrix, org.apache.spark.mllib.linalg.Matrix], numConcepts: Int,
-      numTerms: Int, termIds: scala.collection.Map[Int, String]): Seq[Seq[(String, Double)]] = {
+    def topTermsInTopConcepts(svd: org.apache.spark.mllib.linalg.SingularValueDecomposition[org.apache.spark.mllib.linalg.distributed.RowMatrix, org.apache.spark.mllib.linalg.Matrix],
+        numConcepts: Int,
+        numTerms: Int,
+        termIds: scala.collection.Map[Int, String]): Seq[Seq[(Int,String, Double)]] = {
     val v = svd.V
-    val topTerms = new scala.collection.mutable.ArrayBuffer[Seq[(String, Double)]]()
+    val topTerms = new scala.collection.mutable.ArrayBuffer[Seq[(Int,String, Double)]]()
     val arr = v.toArray
     for (i <- 0 until numConcepts) {
       val offs = i * v.numRows
@@ -180,7 +213,7 @@ class RunLSA extends AbstractRun {
         case ( value, index) => ( math.sqrt( value * value), index)
       }
       val sorted = termWeights.sortBy(-_._1)
-      topTerms += sorted.take(numTerms).map{case (score, id) => (termIds(id), score)}
+      topTerms += sorted.take(numTerms).map{case (score, id) => (id,  termIds(id), score)}
     }
     topTerms
   }
@@ -196,5 +229,10 @@ class RunLSA extends AbstractRun {
     topDocs
   }
 
-  
+  def saveMeasures( path: String, measures : Array[ (Int, Double, Double) ]) = {
+    val ps = new java.io.PrintStream(new java.io.FileOutputStream(path))
+    ps.println("topic\tword2vect\tUMass")
+    measures.foreach( cost => ps.println(cost._1 + "\t"+ + cost._2 +"\t" + cost._3 ))
+    ps.close()
+  }
 }
