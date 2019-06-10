@@ -32,7 +32,7 @@ class RunLDA extends AbstractRun {
       ( nbClusters, ldaPerplexity, ldaLikehood, kmeansWSSE, word2vec, uMass)
       
     }
-    saveLogit("lda-log.csv", logit.toArray)
+    saveMeasures("lda-log.csv", logit.toArray)
   }
   
   def extractTopics( ldaModel: org.apache.spark.ml.clustering.LDAModel, top:Int) = {
@@ -113,10 +113,10 @@ class RunLDA extends AbstractRun {
    
  
   
-  def saveLogit( path: String, wsse : Array[ (Int, Double, Double, Double, Double, Double) ]) = {
+  def saveMeasures( path: String, measures : Array[ (Int, Double, Double, Double, Double, Double) ]) = {
     val ps = new java.io.PrintStream(new java.io.FileOutputStream(path))
     ps.println("topic\tlogLikehood\tlogPerplexity\twsse\tword2vect\tUMass")
-    wsse.foreach( row => ps.println( row._1 + "\t" + row._2 + "\t" + row._3 + "\t" + row._4 + "\t" + row._5 + "\t" + row._6))
+    measures.foreach( row => ps.println( row._1 + "\t" + row._2 + "\t" + row._3 + "\t" + row._4 + "\t" + row._5 + "\t" + row._6))
     ps.close()
   }
   

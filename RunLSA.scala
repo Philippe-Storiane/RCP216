@@ -28,7 +28,6 @@ class RunLSA extends AbstractRun {
   }
   
   def analyzeCluster( nbClusters:Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession) = {
-
     val contentExtractor = new ContentExtractor()
     val paragraphs = contentExtractor.extractContent(sc)
     val doc = contentExtractor.extractRDD( paragraphs, sc )
@@ -40,9 +39,10 @@ class RunLSA extends AbstractRun {
     
     val mat = new org.apache.spark.mllib.linalg.distributed.RowMatrix(termDocMatrix)
     val svd = mat.computeSVD(nbClusters, computeU=true)
-    saveEigenvalues( "lsaEigenValues.csv", svd)
+    saveEigenvalues( "lsa-eigenValues.csv", svd)
     
     findTopicWords(svd, nbClusters, 10, termIds)
+    findTopicMap( svd, 10, termDocMatrix)
     // val topConceptDocs = topDocsInTopConcepts(svd, nbClusters, 10, docIds)
   }
   
@@ -60,6 +60,24 @@ class RunLSA extends AbstractRun {
     saveTopicWords("lsa-topicWords.csv", topicWords)
   }
   
+  def findTopicMap( svd:org.apache.spark.mllib.linalg.SingularValueDecomposition[org.apache.spark.mllib.linalg.distributed.RowMatrix, org.apache.spark.mllib.linalg.Matrix],
+                    top: Int,
+                    termDocMatrix:org.apache.spark.rdd.RDD[org.apache.spark.mllib.linalg.Vector]) = {
+    val v = svd.V
+    val mat = breeze.linalg.DenseMatrix( v.toArray)
+    val indices = for( index <- 0 to v.numCols - 1) yield index
+    val topicMap = termDocMatrix.zipWithIndex.map{
+      case ( doc, index) => {
+        val bDoc = breeze.linalg.SparseVector[Double]( doc.toArray)
+        val bDocLength = breeze.linalg.norm( bDoc)
+        val weights = indices.map( index => ( index, ( mat(::, index) dot bDoc ) / bDocLength))
+        val topWeights = weights.sortBy( _._2).take( top )
+        (index.toLong, topWeights.toArray)
+      }
+    }.collect()
+    saveTopicMap("lsa-topicMap.csv", topicMap)
+  }
+    
   def termDocumentMatrix(docs: org.apache.spark.rdd.RDD[(String, Array[String])], stopWords: Set[String], numTerms: Int,
       sc: org.apache.spark.SparkContext): (org.apache.spark.rdd.RDD[org.apache.spark.mllib.linalg.Vector], Map[Int, String], scala.collection.mutable.Map[Long, String], Map[String, Double]) = {
     val docTermFreqs = docs.mapValues(terms => {
@@ -158,7 +176,9 @@ class RunLSA extends AbstractRun {
     val arr = v.toArray
     for (i <- 0 until numConcepts) {
       val offs = i * v.numRows
-      val termWeights = arr.slice(offs, offs + v.numRows).zipWithIndex
+      val termWeights = arr.slice(offs, offs + v.numRows).zipWithIndex.map{
+        case ( value, index) => ( math.sqrt( value * value), index)
+      }
       val sorted = termWeights.sortBy(-_._1)
       topTerms += sorted.take(numTerms).map{case (score, id) => (termIds(id), score)}
     }

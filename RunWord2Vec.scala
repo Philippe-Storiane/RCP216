@@ -21,13 +21,18 @@ class RunWord2Vec extends AbstractRun {
     var ( paragraphsDF, vocab )  = contentExtractor.extractDataFrame( paragraphs, sc, spark)
     val sentence = paragraphsDF.select("tf","idf")
     val bWordEmbeddings = CoherenceMeasure.loadWordEmbeddings(sc)
-    val sentence2vec = extractWord2Vec( sentence, vocab, bWordEmbeddings, sc, spark)    
+    val sentence2vec = extractWord2Vec( sentence, vocab, bWordEmbeddings, sc, spark)
+    val corpusPMI = CoherenceMeasure.preprocessUMass( paragraphsDF, vocab.length )
     val wsse = for ( nbClusters <- minCluster to maxCluster ) yield {
       println("Computing Kmeans for " + nbClusters + " clusters")
       val ( kmeansParagraphs, kmeansModel ) = computeKMeans(  sentence2vec, nbClusters,  sc, spark )
-      ( nbClusters, kmeansModel.computeCost(kmeansParagraphs))
+      val wsse = kmeansModel.computeCost(kmeansParagraphs)
+      //val topicsWord2vec = CoherenceMeasure.word2vec(topicsDump, vocab, bWordEmbeddings)
+      //val word2vec = topicsWord2vec.map( _._2).sum / nbClusters
+      //val uMass = CoherenceMeasure.uMass(topicsDump, corpusPMI).map(_._2).sum / nbClusters
+      ( nbClusters, kmeansModel.computeCost(kmeansParagraphs))//, word2vec, uMass)
     }
-    saveWSSE("word2vec-wsse.csv", wsse.toArray)
+    saveMeasures("word2vec-wsse.csv", wsse.toArray)
   }
   
   def analyzeCluster( nbCluster:Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession) = {
@@ -176,9 +181,10 @@ class RunWord2Vec extends AbstractRun {
   
  
   
-  def saveWSSE( path: String, wsse : Array[ (Int, Double) ]) = {
+  def saveMeasures( path: String, measures : Array[ (Int, Double/*, Double, Double*/) ]) = {
     val ps = new java.io.PrintStream(new java.io.FileOutputStream(path))
-    wsse.foreach( cost => ps.println(cost._1 + "\t"+ + cost._2 ))
+    ps.println("topic\twsse\tword2vect\tUMass")
+    measures.foreach( cost => ps.println(cost._1 + "\t"+ + cost._2 +"\t" + cost._3 + "\t" + cost._4 ))
     ps.close()
   }
 }
