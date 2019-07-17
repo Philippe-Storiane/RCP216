@@ -13,7 +13,6 @@ import org.apache.spark.ml.linalg.SparseVector
 
 
 
-import fllemmatizer.FLLemmatizer
 import scala.collection.JavaConversions.asScalaBuffer
 import scala.collection.mutable.ArrayBuffer
 
@@ -53,34 +52,10 @@ class ContentExtractor extends Serializable {
   }
 
 
-  def extractPlay( text:Array[String], beginTag: String, endTag: String) = {
-    var inPlay = false
-    var line = ""
-    val textLength = text.length - 1
-    val play =
-      for( index <- 0 to textLength 
-        if {
-          line = text( index )
-          if ( inPlay ) {
-            if ( line.indexOf(endTag) != -1  ) {
-              inPlay = false
-            }
-          } else {
-            if ( line.indexOf(beginTag) != -1 ) {
-              inPlay = true
-            }
-          }
-          inPlay
-        }
-      ) yield line
-    play
-  }
-
   def extractParagraphs( play: IndexedSeq[String]) = {
     val playLength = play.length - 1
     var paragraph = Array("")
     paragraph = paragraph.patch(0, Nil, 1)
-    val lemmatizer = new fllemmatizer.FLLemmatizer("fr")
     var displayParagraph = false
     val paragraphs = for( index <- 0 to playLength
         if {
@@ -90,14 +65,13 @@ class ContentExtractor extends Serializable {
             paragraph = paragraph.patch(0, Nil, 1)
             displayParagraph = false
           }
-          val tokens = scala.collection.JavaConversions.asScalaBuffer( lemmatizer.lemmatize( play( index), true))
-            .filter( s => ( s(1) != "PUNC") && ( s(1) != "NUM") && ( s(2).length > 2 ) )
-          val isParagraphSeparator = tokens.fold( false){ case (a:Boolean, b:Array[String]) => ( a || (b(0).toUpperCase() == b(0)))}
+          val tokens =  play( index).split( " ")
+            .filter( s => s.length > 2  )
+          val isParagraphSeparator = tokens.fold( false){ case (a:Boolean, b:String) => ( a || (b.toUpperCase() == b))}
           if ( tokens.isEmpty || isParagraphSeparator.asInstanceOf[ Boolean] ) {
             if ( ! paragraph.isEmpty) displayParagraph = true
           } else {
-            val words = tokens.map( s => s(2))
-            paragraph ++= words
+            paragraph ++= tokens
           }
           displayParagraph
         }
@@ -108,115 +82,13 @@ class ContentExtractor extends Serializable {
   
     
   
-  def extractVerses( play: IndexedSeq[ String]) = {
-    val lemmatizer = new fllemmatizer.FLLemmatizer("fr")
-    val playLength = play.length - 1
-    var verse = Seq("")
-    verse = verse.patch(0, Nil, 1)
-    var displayVerse = false
-
-    val verses = for( index <- 0 to playLength
-        if {
-          if ( displayVerse ) {
-            verse = Seq("")
-            verse = verse.patch(0, Nil, 1)
-            displayVerse = false
-          }
-
-          val tokens = scala.collection.JavaConversions.asScalaBuffer(lemmatizer.lemmatize(play( index), true))
-              .filter( s => ( s(1) != "PUNC") && ( s(1) != "NUM") && ( s(2).length > 2 ) )
-          val isParagraphSeparator = tokens.fold( false){ case (a:Boolean, b:Array[String]) => ( a || (b(0).toUpperCase() == b(0)))}
-          if (  tokens.isEmpty ||  isParagraphSeparator.asInstanceOf[ Boolean] ) {
-            displayVerse = false
-          } else {
-            verse = tokens.map(s => s(2))
-            displayVerse = true
-          }
-          displayVerse
-        }
-
-    ) yield verse
-    verses
-  }
-  
-  
-  def extractPOS( play: IndexedSeq[ String]) = {
-    val lemmatizer = new fllemmatizer.FLLemmatizer("fr")
-    val playLength = play.length - 1
-    play.map( line => lemmatizer.lemmatize( line ))
-  }
- 
-/*
-    def extractSentences( play: IndexedSeq[ String ]) = {
-  val playLength = play.length - 1
-  val lemmatizer = new FLLemmatizer("fr")
-
-  var displaySentence = false
-  
-  var sentence = Seq("")
-  sentence = sentence.patch(0,Nil, 1)
-  var paragraph = Array( sentence )
-  paragraph = paragraph.patch(0, Nil, 1)
-  val estherSentences = for( index <- 0 to playLength
-      if {
-        println("index " + index)
-        if ( displaySentence ) {
-          
-          sentence = Seq("")
-          sentence = sentence.patch(0,Nil, 1)
-          paragraph = Array( sentence)
-          paragraph = paragraph.patch(0, Nil, 1)
-          displaySentence = false
-        }
-        val tokens = lemmatizer.lemmatize( play( index), true)
-            .filter( s => (  s(1) != "NUM") && ( ( s(2).length > 1 ) || ( s(1) == "PUNC")) )
-        val isParagraphSeparator = tokens.fold( false){ case (a:Boolean, b:Array[String]) => ( a || ( (b(1) != "PUNC" ) && ( b(0).toUpperCase() == b(0))))}
-        displaySentence = true
-        if (  tokens.isEmpty ||  isParagraphSeparator.asInstanceOf[ Boolean] ) {
-          println("In Separator" + play( index))
-          if( paragraph.length > 1 ) {
-            if (  ! sentence.isEmpty ) paragraph ++= Array(sentence)
-            displaySentence = true
-          }
-          println( "paragraph" + paragraph.length)
-        } else {
-          println( "separator" + isParagraphSeparator.asInstanceOf[ Boolean])
-          for (token <- 0 to tokens.length - 1) {
-              if ( tokens( token )(1) == "PUNC") {
-                if ( (tokens( token )(0) == ".") || ( tokens( token)(0) == ";") ) 
-                  if (  ! sentence.isEmpty  ) {
-                    paragraph ++= Array(sentence)
-                    sentence = Seq("")
-                    sentence = sentence.patch(0,Nil, 1)
-                  }
-              } else {
-                sentence ++= Seq(tokens( token )(2))
-              }
-          }
-        }
-        true //displaySentence
-      }
-
-  ) yield paragraph
-  estherSentences
-    }
-*/
-    //
-    // extract data
-    //
-    
+     
 
 
   def extractContent(sc:org.apache.spark.SparkContext) = {
-    val estherText = sc.textFile("esther-utf8.txt").collect()
-    val estherPlay = extractPlay( estherText, "ACTE PREMIER.", "NOTES TO PROLOGUE.")
-    val estherParagraphs = extractParagraphs( estherPlay )
-    val mythridateText = sc.textFile("mythridate-utf8.txt").collect()
-    val mythridatePlay = extractPlay( mythridateText, "ACTE PREMIER", "End of the Project Gutenberg")
-    val mythridateParagraphs = extractParagraphs( mythridatePlay )
-    
-    //val mythridateParagraphs = extractVerses( mythridatePlay )
-    estherParagraphs ++ mythridateParagraphs
+    val content = sc.textFile("stanford-nlp.txt").collect()
+    val paragraphs = extractParagraphs( content )
+    paragraphs
     //mythridateParagraphs
   }
     
@@ -233,11 +105,116 @@ class ContentExtractor extends Serializable {
 
   def loadStopWords() = {
     val stopWords = org.apache.spark.ml.feature.StopWordsRemover.loadDefaultStopWords("french")
-    val pronounStopWords = Array("les","tous","sans","tout","point","quel", "cette","enfin", "quoi", "être","dont","cet","ici","encore","trop","leurs","moins","ils","quand","donc","quelle","quelque","comme","sous","fois","ainsi", "devant","deux","tant","déjà","jusqu","puis","prêt","allez","dès","encore","mille","dis","hui","entre","combien","malgré","assez","toute","cependant","tandis","tel","toutes","plutôt","avant","lorsque","hélas","pourquoi","oui","non","bien","juste","plus")
-    val verbalStopWords = Array("faut", "vient","crois","fait","laisser")
-    val nameStopWords = Array("pharnace", "xipharès","esther","mithridate","aman","arbate","monime","mardochée","assuérus")
-    val subjectStoWords= Array("nom", "seigneur","roi","reine","madame")
-    stopWords //union pronounStopWords union verbalStopWords union nameStopWords union subjectStoWords
+    val adverbStopWords = Array(
+        "tel",  
+        "tout",
+        "que?",
+        "autre",
+        "cher",
+        "fois",
+        "comment?",
+        "jusqu'à",
+        "cla",
+        "encor",
+        "nouveau",
+        "combien",
+        "moindre",
+        "point",
+        "pourquoi?",
+        "quelque",
+        "livrer",
+        "prêter",//
+        "aujourd'hui",
+        "former",
+        "seul",//
+        "juste",
+        "grand",
+        "prêt",
+        "nouveau",
+        "propre",//
+        "sain",//
+        "propre",
+        "hélas",
+        "plein",
+        "cld",
+        "dernier", // TBC
+        "rang", // TBC
+        "premier")
+    val verbalStopWords = Array(
+        "voir",
+        "tenir",// TBC
+        "être",
+        "assurer",//
+        "avoir",
+        "faire",
+        "voir",
+        "pouvoir",
+        "vouloir",
+        "entendre",//
+        "laisser",//
+        "oser",//
+        "porter",//
+        "courir",//
+        "dire",
+        "savoir",
+        "venir",
+        "aller",
+        "mettre",
+        "reste",
+        "prétendre",
+        "chercher",
+        "suivre",
+        "rendre",
+        "donner",
+        "quitter",
+        "recevoir",
+        "demander",//
+        "trouver",//
+        "écouter",
+        "montrer",
+        "passer")
+    val nameStopWords = Array(
+        "Mardochée",
+        "Monime",
+        "Pharnace",
+        "Esther",
+        "Xipharès",
+        "Mithridate",
+        "Aman",
+        "Phoedime",
+        "Sion",
+        "Assuérus",
+        "Arbate",
+        "Asaph",
+        "Grèce",
+        "Rome")
+    val subjectStoWords= Array(
+        "Monsieur",
+        "nom",
+        "main",
+        "romain",
+        "mot",
+        "front",//
+        "voix",//
+        "soin",//
+        "lieux",//
+        "heure",// TBC
+        "place",//
+        "persan",
+        "juif",
+        "Israel",
+        "bouche",
+        "moment",//
+        "oreille",
+        "histoire",//
+        "présent", // ambiguité des sens
+        "genou", // TBC
+        "effet",
+        "yeux",
+        "sujet", // half style
+        "chemin" // half style
+        )
+    stopWords union adverbStopWords union verbalStopWords union nameStopWords union subjectStoWords
     
   }
   
@@ -265,7 +242,7 @@ class ContentExtractor extends Serializable {
     val countVectorizerModel = new org.apache.spark.ml.feature.CountVectorizer()
       .setInputCol("filtered")
       .setOutputCol("tf")
-      .setMinDF(1)
+      .setMinDF(7)
       .fit( filteredParagraphs )
       
     val termFrequencyParagraphs = countVectorizerModel.transform( filteredParagraphs)

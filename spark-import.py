@@ -20,7 +20,7 @@ data = pd.read_csv( lsa_eigen_values,header = None)
 plt.plot( data)
 
 ## Fréquence des mots dans les documents
-data2= pd.read_csv("full-vocab-freq.tsv", sep='\t' , encoding='latin1', header = None)
+data2= pd.read_csv("docfreqs.tsv", sep='\t' , encoding='latin1', header = None)
 plt.hist(data2.iloc[:,1], range=[0,25], bins=20)
 
 

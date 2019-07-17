@@ -89,7 +89,7 @@ class RunWord2Vec extends AbstractRun {
       spark: org.apache.spark.sql.SparkSession) = {
     //val bWordEmbeddings = CoherenceMeasure.loadWordEmbeddings( sc )
     val contentExtractor = new ContentExtractor()
-    val vocabSize = 200
+    val vocabSize = 500
     val sentence2vec = sentence.map( row => {
         val tfVector = row.getAs[ org.apache.spark.ml.linalg.SparseVector]("tf")
         val idfVector = row.getAs[ org.apache.spark.ml.linalg.SparseVector]("idf")
