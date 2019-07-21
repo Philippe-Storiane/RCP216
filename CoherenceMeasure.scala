@@ -2,7 +2,6 @@ package com.rcp216.racineTopic
 
 object CoherenceMeasure {
   
-  val ETA = 1.0 / 500
   
   def loadWordEmbeddings( sc: org.apache.spark.SparkContext) = {
     val wordEmbeddingsFile = "frWac_no_postag_no_phrase_500_skip_cut100.txt"
@@ -23,34 +22,35 @@ object CoherenceMeasure {
       vocab: Array[String],
       bWordEmbeddings: org.apache.spark.broadcast.Broadcast[scala.collection.Map[String, org.apache.spark.ml.linalg.Vector]]) = {
     var topicNumber = topicTopWords.length
+    val combination_top_word = Range(0,10).combinations(2).size
     val result = topicTopWords.map( topic => {
         val topicIndex = topic._1
         val termIndices = topic._2
         val wordsLength = topic._2.length
         var topicMeasure = 0.0
-        for( i <- 0 to wordsLength - 1) {
-          val wordIndex_i = termIndices(i)
-          val wordText_i = vocab( wordIndex_i )
-          if ( bWordEmbeddings.value.get( wordText_i) != None ) {
-            val wordEmbeddings_i = bWordEmbeddings.value( wordText_i )
-            val word_i = new breeze.linalg.DenseVector[ Double ] ( wordEmbeddings_i.toArray)
-            val word_i_norm = breeze.linalg.norm( word_i)
-            for(j <- i + 1  to wordsLength - 1) {
-              val wordIndex_j = termIndices(j)
-              val wordText_j = vocab( wordIndex_j )
-              if ( bWordEmbeddings.value.get(wordText_j ) != None ) {
-                val wordEmbeddings_j = bWordEmbeddings.value( wordText_j )
-                val word_j = new breeze.linalg.DenseVector[ Double ] ( wordEmbeddings_j.toArray)
-                topicMeasure = topicMeasure + ( word_i dot word_j ) /( word_i_norm * breeze.linalg.norm( word_j))
+        for( j <- 1 to wordsLength - 1) {
+          val wordIndex_j = termIndices(j)
+          val wordText_j = vocab( wordIndex_j )
+          if ( bWordEmbeddings.value.get( wordText_j) != None ) {
+            val wordEmbeddings_i = bWordEmbeddings.value( wordText_j )
+            val word_j = new breeze.linalg.DenseVector[ Double ] ( wordEmbeddings_i.toArray)
+            val word_j_norm = breeze.linalg.norm( word_j)
+            for(i <- 0  to j - 1) {
+              val wordIndex_i = termIndices(i)
+              val wordText_i = vocab( wordIndex_i )
+              if ( bWordEmbeddings.value.get(wordText_i ) != None ) {
+                val wordEmbeddings_i = bWordEmbeddings.value( wordText_i )
+                val word_i = new breeze.linalg.DenseVector[ Double ] ( wordEmbeddings_i.toArray)
+                topicMeasure = topicMeasure + ( word_i dot word_j ) /( word_j_norm * breeze.linalg.norm( word_i))
               } else {
-                println("unknown word " + wordText_j + " for topic " + topicIndex)
+                println("unknown word " + wordText_i + " for topic " + topicIndex)
               }
             }
           } else {
-            println("unknown word " + wordText_i + " for topic " + topicIndex)
+            println("unknown word " + wordText_j + " for topic " + topicIndex)
           }          
         }
-        ( topicIndex, topicMeasure / wordsLength)
+        ( topicIndex, topicMeasure / ( wordsLength * combination_top_word))
       }
     )
     result
@@ -82,29 +82,43 @@ object CoherenceMeasure {
         index += 1
       }
     )
+    /*
     for( ( r,c) <- wocCounts.activeKeysIterator) {
-      val denom = wocCounts(c, c)
-      val joint = wocCounts(r, c) / denom
-      wocCounts(r, c) = joint
+      if ( r != c) {
+        val denom = wocCounts(c, c)
+        val joint = ( wocCounts(r, c)  + ETA )/ denom
+        wocCounts(r, c) = joint
+      }      
     }
+    */
     wocCounts
 
   }
   
   def uMass( topicTopWords: Array[ ( Int, Array[Int] ) ], corpusPMI: breeze.linalg.CSCMatrix[Double] )= {
-    var topicNumber = topicTopWords.length
+    val topicNumber = topicTopWords.length
+    val vocabSize = java.lang.Math.sqrt( corpusPMI.size)
+    val combination_top_word = Range(0,10).combinations(2).size
+    var eta = 1.0
+    var prop = System.getProperty("rcp216.umass.eta")
+    if ( prop != null ) {
+      eta = prop.toDouble
+    }
     val result = topicTopWords.map( topic => {
         val topicIndex = topic._1
         val termIndices = topic._2
         val wordsLength = topic._2.length
-        var measure = 0.0
-        for ( List(w1,w2) <- termIndices.toList.combinations(2)) {
-          val pw1_w2 = java.lang.Math.log( corpusPMI( w1,w2) + ETA )
-          val pw1 = java.lang.Math.log( corpusPMI(w1, w1) )
-          val pw2 = java.lang.Math.log( corpusPMI(w2,w2) )
-          measure = measure + 2 * pw1_w2 - pw1 - pw2 
+        var measure = 0.0        
+        for ( j <- Range(1, wordsLength)) {
+          val wj = termIndices( j )
+          for( i <- Range(0, j - 1)) {
+            val wi = termIndices( i )
+            val pwi_j = corpusPMI(wi, wj) + eta
+            val pwj= corpusPMI( wj, wj)
+            measure = measure + java.lang.Math.log( pwi_j) - java.lang.Math.log( pwj )
+          }
         }
-        ( topicIndex, measure / wordsLength )
+        ( topicIndex, measure / ( wordsLength * combination_top_word ))
       }
     )
     result

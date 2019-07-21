@@ -20,7 +20,7 @@ class RunLDA extends AbstractRun {
     val corpusPMI = CoherenceMeasure.preprocessUMass( docDF, vocabulary.length )
     val measures = for ( nbClusters <- minCluster to maxCluster ) yield {
       println("Computing LDA for " + nbClusters + " clusters")
-      val ( ldaParagraphs, ldaModel) = computeLDA(  ldaTrain, nbClusters )
+      val ( ldaParagraphs, ldaModel) = computeLDA(  docDF, nbClusters )
       val ( kmeansParagraphs, kmeansModel ) = computeKMeans( ldaParagraphs, nbClusters)
       val ldaPerplexity = ldaModel.logPerplexity( ldaTest)
       val ldaLikehood = ldaModel.logLikelihood( ldaTest)
@@ -47,7 +47,7 @@ class RunLDA extends AbstractRun {
   
   
   def computeKMeans( docDF: org.apache.spark.sql.DataFrame, nbClusters: Int) = {
-    val nbIterations = 100
+    val nbIterations = 1000
        val kmeans = new org.apache.spark.ml.clustering.KMeans()
       .setK( nbClusters )
       .setMaxIter( nbIterations)
@@ -59,12 +59,48 @@ class RunLDA extends AbstractRun {
       val kmeanParagraphs = kmeansModel.transform( docDF )
       ( kmeanParagraphs, kmeansModel)
   }
-  
+
   def computeLDA( docDF: org.apache.spark.sql.DataFrame, nbClusters: Int) = {
-    val lda = new org.apache.spark.ml.clustering.LDA()
+    var maxIterations = 500
+    var docConcentration = -1
+    var topicConcentration = -1
+    var optimizer = "online"
+    var seed = 1L
+    var prop = System.getProperty("rcp216.lda.maxIterations")
+    if ( prop != null ) {
+      maxIterations = prop.toInt
+    }
+    prop = System.getProperty("rcp216.lda.topicConcentration")
+    if ( prop != null ) {
+      topicConcentration = prop.toInt
+    }
+    prop = System.getProperty("rcp216.lda.docConcentration")
+    if ( prop != null ) {
+      docConcentration = prop.toInt
+    }
+    prop = System.getProperty("rcp216.lda.seed")
+    if ( prop != null ) {
+      seed = prop.toLong
+    }
+    prop = System.getProperty("rcp216.lda.optimizer")
+    if ( prop != null ) {
+      optimizer = prop
+    }
+    var lda = new org.apache.spark.ml.clustering.LDA()
       .setK( nbClusters )
-      .setMaxIter(500)
+//      .setOptimizer("EM")
+      .setOptimizer( optimizer )
+      .setMaxIter( maxIterations )
+      .setSeed( seed )
+//      .setDocConcentration( docConcentration )
+//      .setTopicConcentration( topicConcentration )
       .setFeaturesCol("tf")
+    if ( docConcentration != -1 ) {
+      lda = lda.setDocConcentration( docConcentration )
+    }
+    if ( topicConcentration != - 1 ) {
+      lda = lda.setDocConcentration( topicConcentration )
+    }
     val ldaModel = lda.fit( docDF )
     val ldaParagraphs = ldaModel.transform( docDF )
     ( ldaParagraphs, ldaModel )

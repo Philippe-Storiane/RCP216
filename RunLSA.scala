@@ -27,7 +27,7 @@ class RunLSA extends AbstractRun {
     val contentExtractor = new ContentExtractor()
     val paragraphs = contentExtractor.extractContent(sc)
     val doc = contentExtractor.extractRDD( paragraphs, sc )
-    val stopWords = contentExtractor.loadStopWords().toSet.asInstanceOf[ Set[String]]
+    val stopWords = contentExtractor.loadStopWords( sc ).toSet.asInstanceOf[ Set[String]]
     val (docDF, vocabulary) = contentExtractor.extractDataFrame(paragraphs, sc, spark)
     println("number of paragraphs: " + paragraphs.length)
     println("vocabulary size: " + vocabulary.length)
@@ -61,7 +61,7 @@ class RunLSA extends AbstractRun {
     val contentExtractor = new ContentExtractor()
     val paragraphs = contentExtractor.extractContent(sc)
     val doc = contentExtractor.extractRDD( paragraphs, sc )
-    val stopWords = contentExtractor.loadStopWords().toSet.asInstanceOf[ Set[String]]
+    val stopWords = contentExtractor.loadStopWords( sc ).toSet.asInstanceOf[ Set[String]]
     val (docDF, vocabulary) = contentExtractor.extractDataFrame(paragraphs, sc, spark)
     println("number of paragraphs: " + paragraphs.length)
     println("vocabulary size: " + vocabulary.length)

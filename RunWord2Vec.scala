@@ -136,10 +136,25 @@ class RunWord2Vec extends AbstractRun {
     
 
         
-    val nbIterations = 50
+    var nbIterations = 1000
+    var initSteps = 2
+    var seed = 1L
+    var prop = System.getProperty("rcp216.word2vec.nbIterations")
+    if ( prop != null ) {
+      nbIterations = prop.toInt
+    }
+    prop = System.getProperty("rcp216.word2vec.initSteps")
+    if ( prop != null ) {
+      initSteps = prop.toInt
+    }
+    prop = System.getProperty("rcp216.word2vec.seed")
+    if ( prop != null ) {
+      seed = prop.toLong
+    }
     val kmeans = new org.apache.spark.ml.clustering.KMeans()
       .setK( nbClusters )
       .setMaxIter( nbIterations)
+      .setInitSteps( initSteps )
       .setFeaturesCol("value")
       .setInitMode("k-means||")
       .setPredictionCol("topic")

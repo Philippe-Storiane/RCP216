@@ -24,7 +24,16 @@ data2= pd.read_csv("docfreqs.tsv", sep='\t' , encoding='latin1', header = None)
 plt.hist(data2.iloc[:,1], range=[0,25], bins=20)
 
 
-word2vecWSSE = pd.read_csv("word2vec-wsse.csv", sep='\t' , encoding='latin1', header = None)
+word2vec = pd.read_csv("word2vec-measures-tst.csv", sep='\t' , encoding='latin1')
+word2vec.plot(x="topic", y="UMass")
+
+lda = pd.read_csv("lda-measures-tst.csv", sep='\t' , encoding='latin1')
+
+lsa = pd.read_csv("lsa-measures-tst.csv", sep='\t' , encoding='latin1')
+lsa.plot(x="topic", y="UMass")
+lsa.plot(x="topic", y="word2vect")
+
+
 
 ldaLogit = pd.read_csv("lda-log.csv", sep='\t' , encoding='latin1')
 plt.plot( ldaLogit.loc[:,"topic"], ldaLogit.loc[:,"UMass"])
