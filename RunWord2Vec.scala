@@ -46,7 +46,7 @@ class RunWord2Vec extends AbstractRun {
     val contentExtractor = new ContentExtractor()
     var paragraphs = contentExtractor.extractContent(sc)
     var ( paragraphsDF, vocab )  = contentExtractor.extractDataFrame( paragraphs, sc, spark)
-    val sentence = paragraphsDF.select("tf","idf")
+    val sentence = paragraphsDF.select("filtered", "tf","idf")
     val bWordEmbeddings = CoherenceMeasure.loadWordEmbeddings( sc )
     val sentence2vec = extractWord2Vec( sentence, vocab, bWordEmbeddings, sc, spark)
     val ( kmeansParagraphs, kmeansModel ) = computeKMeans(  sentence2vec, nbCluster, sc, spark )
@@ -90,7 +90,9 @@ class RunWord2Vec extends AbstractRun {
     //val bWordEmbeddings = CoherenceMeasure.loadWordEmbeddings( sc )
     val contentExtractor = new ContentExtractor()
     val vocabSize = 500
+    var emptyRow = 0
     val sentence2vec = sentence.map( row => {
+        val filtered = row.getAs[scala.collection.mutable.WrappedArray[String]]("filtered")
         val tfVector = row.getAs[ org.apache.spark.ml.linalg.SparseVector]("tf")
         val idfVector = row.getAs[ org.apache.spark.ml.linalg.SparseVector]("idf")
         var sentenceVector = breeze.linalg.DenseVector.zeros[ Double ]( vocabSize )
@@ -99,16 +101,25 @@ class RunWord2Vec extends AbstractRun {
               val tf = tfVector.apply( index )
               val idf = idfVector.apply( index )
               val word = vocab( index)
-              val value = bWordEmbeddings.value.get( word )
+              if ( ! filtered.contains( word ) ) {
+                println("unknown filtered word " + word)
+              }
+              val value = bWordEmbeddings.value.get( word ) 
               if ( value != None ) {
                 sentenceVector += ( tf * idf ) * contentExtractor.denseSparkToBreeze( bWordEmbeddings.value( word).asInstanceOf[ org.apache.spark.ml.linalg.DenseVector ] )
                 wordWeight += ( tf * idf )                
+              } else {
+                println("Unknown word2vec word " + word)
+                // unknownWords += word
               }
           }
         )
-
-        if ( wordWeight != 0 ) {
+        println(" test " +  wordWeight)
+        if ( wordWeight != 0.0 ) {
           sentenceVector = sentenceVector / wordWeight
+        } else {
+          emptyRow = emptyRow + 1          
+          println("new Empty Row " + emptyRow + " " + sentenceVector)
         }
 
         
@@ -116,7 +127,8 @@ class RunWord2Vec extends AbstractRun {
 
       }
     )(org.apache.spark.sql.catalyst.encoders.ExpressionEncoder(): org.apache.spark.sql.Encoder[ org.apache.spark.ml.linalg.Vector ])
-    sentence2vec
+    // unknownWords.foreach( word => println( word ))
+    sentence2vec.filter( sentence => sentence.numNonzeros != 0 )
 
   }
   

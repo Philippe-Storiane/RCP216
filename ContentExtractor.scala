@@ -86,7 +86,7 @@ class ContentExtractor extends Serializable {
 
 
   def extractContent(sc:org.apache.spark.SparkContext) = {
-    val content = sc.textFile("stanford-nlp.txt").collect()
+    val content = sc.textFile("standford-nlp.txt").collect()
     val paragraphs = extractParagraphs( content )
     paragraphs
     //mythridateParagraphs
@@ -132,7 +132,7 @@ class ContentExtractor extends Serializable {
     // TF IDF
     //
     val minDFProp = System.getProperty("rcp216.minDF")
-    var minDF = 1
+    var minDF = 3
     if ( minDFProp != null) {
       minDF = minDFProp.toInt
     }

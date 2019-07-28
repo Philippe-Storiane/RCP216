@@ -33,22 +33,65 @@ import scala.collection.mutable.WrappedArray
   
 }
 */
-class Test extends Serializable{
-     def main( args: Array[String], sc:SparkContext, spark:SparkSession) = {
-     var contentExtractor = new ContentExtractor()
-     var paragraphs = contentExtractor.extractContent(sc)
-     val (docDF, vocabulary) = contentExtractor.extractDataFrame(paragraphs, sc, spark)
-      val corpusPMI = CoherenceMeasure.preprocessUMass( docDF, vocabulary.length)
-     val nbClusters = 10
-     val ( ldaParagraphs, ldaModel ) = RunLDA.computeLDA(docDF, nbClusters)
-     val topics = ldaModel.describeTopics(10)
-     val topicsDump = topics
-        .select("topic","termIndices")
-        .rdd
-        .map( row => ( row.getAs[Int](0), row.getAs[scala.collection.mutable.WrappedArray[ Int]](1).toSeq.toArray))
-        .collect()
-     val ldaUMass = CoherenceMeasure.uMass( topicsDump, corpusPMI).map(_._2).sum / nbClusters
-        
+class Test {
+  
+  def getEnv(
+      sc:org.apache.spark.SparkContext,
+      spark: org.apache.spark.sql.SparkSession) = {
+    val ce = new ContentExtractor()
+    val content = ce.extractContent( sc )
+    val paragraphsDF = spark.createDataset( content )(org.apache.spark.sql.catalyst.encoders.ExpressionEncoder(): org.apache.spark.sql.Encoder[Array[String]])toDF("rawText")
 
-     }
+
+
+    //
+    // remove stop words
+    //
+    val remover = new org.apache.spark.ml.feature.StopWordsRemover()
+      .setStopWords( ce.loadStopWords( sc ))
+      .setInputCol("rawText")
+      .setOutputCol("filtered")
+
+    val filteredParagraphs = remover.transform(paragraphsDF)
+    
+    //
+    // TF IDF
+    //
+
+    val countVectorizerModel = new org.apache.spark.ml.feature.CountVectorizer()
+      .setInputCol("filtered")
+      .setOutputCol("tf")
+      .setMinDF( 3 )
+      .fit( filteredParagraphs )
+    val vocab = countVectorizerModel.vocabulary
+    val p = countVectorizerModel.transform( filteredParagraphs)
+    var index = 0
+    p.collect().foreach( row => {
+
+        println("index " + index)
+        var filtered = row.getAs[scala.collection.mutable.WrappedArray[String]]("filtered")
+        var tfVector = row.getAs[org.apache.spark.ml.linalg.SparseVector]("tf")
+        var number = 0.0
+        tfVector.indices.foreach( index => {
+            val  tf = tfVector.apply(index)
+            if ( tf == 0.0 ) {
+              println("tf 0 at index " + index)
+            }
+            val word = vocab( index )
+            if ( ! filtered.contains( word )) {
+              println(index + "unknown word " + word)
+            }
+            number += tf
+          }
+        )
+        /*
+        if ( ( filtered.size * 1.0 ) != number) {
+          println(index + " discrepencies in number " + filtered.size + " " + number + "\n" + "for filter " + filtered)
+        }
+        */
+        index = index + 1
+      }
+    )
+  }
+ 
 }
