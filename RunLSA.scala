@@ -35,9 +35,9 @@ class RunLSA extends AbstractRun {
     
     val bWordEmbeddings = CoherenceMeasure.loadWordEmbeddings(sc)
     val corpusPMI = CoherenceMeasure.preprocessUMass( docDF, vocabulary.length )
-    
+    var k = 200
     val mat = new org.apache.spark.mllib.linalg.distributed.RowMatrix(termDocMatrix)
-    val svd = mat.computeSVD(maxCluster, computeU=true)
+    val svd = mat.computeSVD(k , computeU=true)
     val measures = for ( nbCluster <- minCluster to maxCluster ) yield {
       val topicWords = findTopicWords(svd, nbCluster, 10, termIds)
       val topicsDump = topicWords.map{
@@ -64,11 +64,13 @@ class RunLSA extends AbstractRun {
     val stopWords = contentExtractor.loadStopWords( sc ).toSet.asInstanceOf[ Set[String]]
     val (docDF, vocabulary) = contentExtractor.extractDataFrame(paragraphs, sc, spark)
     println("number of paragraphs: " + paragraphs.length)
+    println("number of non empty paragraphs: " + doc.count)
     println("vocabulary size: " + vocabulary.length)
     val (termDocMatrix, termIds, docIds, idfs) = termDocumentMatrix( doc, stopWords, vocabulary.length, sc)
     
+    var k = 200
     val mat = new org.apache.spark.mllib.linalg.distributed.RowMatrix(termDocMatrix)
-    val svd = mat.computeSVD(nbClusters, computeU=true)
+    val svd = mat.computeSVD(k , computeU=true)
     saveEigenvalues( "lsa-eigenValues.csv", svd)
     
     val topicWords = findTopicWords(svd, nbClusters, 10, termIds)
@@ -137,15 +139,21 @@ class RunLSA extends AbstractRun {
     val bTermIds = sc.broadcast(termIds).value
 
     val vecs: org.apache.spark.rdd.RDD[org.apache.spark.mllib.linalg.Vector] = docTermFreqs.map(_._2).map(termFreqs => {
-      val docTotalTerms = termFreqs.values.sum
-      val termScores = termFreqs.filter {
+      val termFreqsFiltered = termFreqs.filter {
         case (term: String, freq) => ( bTermIds.contains(term) )
-      }.map{
+      }
+      val docTotalTerms = termFreqsFiltered.values.sum
+      val termScores = termFreqsFiltered.map{
         case (term: String, freq) => (bTermIds(term), bIdfs(term) * termFreqs(term) / docTotalTerms)
       }.toSeq
       org.apache.spark.mllib.linalg.Vectors.sparse(bTermIds.size, termScores)
     })
-    (vecs, termIds.map(_.swap), docIds, idfs)
+    var minNonzeros = 0
+    var prop = System.getProperty("rcp216.minNonzeros")
+    if ( prop != null ) {
+      minNonzeros = prop.toInt
+    }
+    (vecs.filter( vect => vect.numNonzeros > minNonzeros ), termIds.map(_.swap), docIds, idfs)
   }
 
   def documentFrequencies(docTermFreqs: org.apache.spark.rdd.RDD[scala.collection.mutable.HashMap[String, Int]]): scala.collection.mutable.HashMap[String, Int] = {
@@ -170,8 +178,14 @@ class RunLSA extends AbstractRun {
   def documentFrequenciesDistributed(docTermFreqs: org.apache.spark.rdd.RDD[scala.collection.mutable.HashMap[String, Int]], numTerms: Int)
       : Array[(String, Int)] = {
     val docFreqs = docTermFreqs.flatMap(_.keySet).map((_, 1)).reduceByKey(_ + _, 15)
-    val ordering = Ordering.by[(String, Int), Int](_._2)
-    docFreqs.top(numTerms)(ordering)
+    // val ordering = Ordering.by[(String, Int), Int](_._2)
+    // docFreqs.top(numTerms)(ordering)
+    var minDF = 2
+    val prop = System.getProperty("rcp216.minDF")
+    if ( prop != null ) {
+      minDF = prop.toInt
+    }
+    docFreqs.filter( row => row._2 >= minDF ).collect()
   }
 
   def trimLeastFrequent(freqs: scala.collection.Map[String, Int], numToKeep: Int): Map[String, Int] = {
@@ -180,7 +194,7 @@ class RunLSA extends AbstractRun {
 
   def inverseDocumentFrequencies(docFreqs: Array[(String, Int)], numDocs: Int)
     : Map[String, Double] = {
-    docFreqs.map{ case (term, count) => (term, math.log(numDocs.toDouble / count))}.toMap
+    docFreqs.map{ case (term, count) => (term, math.log( ( numDocs.toDouble + 1 ) / ( count + 1 ) ))}.toMap
   }
 
   def saveDocFreqs(path: String, docFreqs: Array[(String, Int)]) {

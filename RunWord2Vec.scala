@@ -7,6 +7,8 @@ import org.apache.spark.sql.SparkSession
 import org.apache.spark.ml.linalg.SQLDataTypes.VectorType
 
 import org.apache.spark.ml.clustering.KMeans
+import org.apache.spark.ml.feature.StandardScaler
+import org.apache.spark.ml.feature.StandardScalerModel
 import org.apache.spark.ml.feature.{Word2Vec, Word2VecModel}
 import org.apache.spark.ml.linalg.{ DenseVector => SparkDenseVector}
 
@@ -58,22 +60,33 @@ class RunWord2Vec extends AbstractRun {
   
   
   def findTopicMap( kmeansModel: org.apache.spark.ml.clustering.KMeansModel, top: Int, sentence2vec:org.apache.spark.sql.Dataset[org.apache.spark.ml.linalg.Vector]) = {
+    val isEuclidian:Boolean = isEuclidianDistance()
     val docs = sentence2vec.withColumn("id",org.apache.spark.sql.functions.monotonicallyIncreasingId)
     val topicMap = docs.collect().map( row => {
         val index = row.getAs[ Long ]("id")
         val sentenceVector = row.getAs[ org.apache.spark.ml.linalg.DenseVector ]("value")
         val bSentenceVector = breeze.linalg.DenseVector[Double]( sentenceVector.toArray )
-        val bSentenceVectorLength = breeze.linalg.norm ( bSentenceVector )
+        val bSentenceVectorLength = breeze.linalg.norm ( bSentenceVector )          
         val clustersDist = kmeansModel.clusterCenters.zipWithIndex.map{
           { case ( cluster, index )  => {
               val bCluster = breeze.linalg.DenseVector( cluster.toArray )
               val bClusterLength = breeze.linalg.norm( bCluster )
-              val dist = ( bCluster dot bSentenceVector ) / ( bClusterLength * bSentenceVectorLength)
+              var dist = 0.0
+              if ( isEuclidian ) {
+                dist = org.apache.spark.ml.linalg.Vectors.sqdist( cluster, sentenceVector)
+              } else {
+                dist = ( bCluster dot bSentenceVector ) / ( bClusterLength * bSentenceVectorLength) 
+              }
               ( index, dist )  
             }
           }
         }
-        val clustersDistTop = clustersDist.sortWith( _._2 > _._2).take( top )
+        var clustersDistTop = clustersDist
+        if ( isEuclidian ) {
+          clustersDistTop = clustersDist.sortWith( _._2 < _._2).take( top )
+        } else {
+          clustersDistTop = clustersDist.sortWith( _._2 > _._2).take( top )
+        }
         (index, clustersDistTop)
       }
     )
@@ -128,7 +141,7 @@ class RunWord2Vec extends AbstractRun {
       }
     )(org.apache.spark.sql.catalyst.encoders.ExpressionEncoder(): org.apache.spark.sql.Encoder[ org.apache.spark.ml.linalg.Vector ])
     // unknownWords.foreach( word => println( word ))
-    sentence2vec.filter( sentence => sentence.numNonzeros != 0 )
+    sentence2vec
 
   }
   
@@ -150,7 +163,9 @@ class RunWord2Vec extends AbstractRun {
         
     var nbIterations = 1000
     var initSteps = 2
-    var seed = 1L
+    var seed = new org.apache.spark.ml.clustering.KMeans().getSeed
+    var scaling = false
+    var inputCol = "value"
     var prop = System.getProperty("rcp216.word2vec.nbIterations")
     if ( prop != null ) {
       nbIterations = prop.toInt
@@ -163,25 +178,60 @@ class RunWord2Vec extends AbstractRun {
     if ( prop != null ) {
       seed = prop.toLong
     }
+    prop = System.getProperty("rcp216.word2vec.scaling")
+    if ( "yes".equals( prop) ) {
+      scaling = true
+    }
+    if ( scaling ) {
+      inputCol = "scaled_value"
+    }
     val kmeans = new org.apache.spark.ml.clustering.KMeans()
       .setK( nbClusters )
       .setMaxIter( nbIterations)
       .setInitSteps( initSteps )
-      .setFeaturesCol("value")
+      .setFeaturesCol( inputCol )
+      .setSeed( seed )
       .setInitMode("k-means||")
       .setPredictionCol("topic")
       
-      val kmeansModel = kmeans.fit( sentence2vec )
-      val kmeanParagraphs = kmeansModel.transform( sentence2vec )
+    if ( scaling ) {
+        val scaler = new StandardScaler()
+          .setWithMean( true )
+          .setWithStd( true )
+          .setInputCol("value")
+          .setOutputCol( inputCol )
+          .fit( sentence2vec ) 
+        val sentenceData = scaler.transform( sentence2vec )
+        val kmeansModel = kmeans.fit( sentenceData )
+        val kmeanParagraphs = kmeansModel.transform( sentenceData )
+        ( kmeanParagraphs, kmeansModel)
+    } else {
+        val kmeansModel = kmeans.fit( sentence2vec )
+        val kmeanParagraphs = kmeansModel.transform( sentence2vec )
+        ( kmeanParagraphs, kmeansModel)
+    } 
+    
+      
  //     val l = findSynonyms(kmeansModel, top,  vocab, bWordEmbeddings )
 
     //saveWSSE( "word2vec-wsse.csv", wsse.toArray)
-      ( kmeanParagraphs, kmeansModel)
+      
   }
+  
+  def isEuclidianDistance():Boolean = {
+    val distance = System.getProperty("rcp216.word2vec.distance")
+    var isEuclidian = false
+    if ("euclidian".equals( distance )) {
+      isEuclidian = false
+    }
+    return isEuclidian
+  }
+  
   
   def findTopicWords( kmeansModel: org.apache.spark.ml.clustering.KMeansModel,
       top:Int, vocab: Array[ String ],
       bWordEmbeddings: org.apache.spark.broadcast.Broadcast[scala.collection.Map[String, org.apache.spark.ml.linalg.Vector]]) = {
+    val isEuclidian = isEuclidianDistance()
     val realVocab = vocab.zipWithIndex.filter{ case ( word, index)  => bWordEmbeddings.value.get( word ) != None}
     val topicWords = kmeansModel.clusterCenters.zipWithIndex.map{  case ( cluster, index ) =>
       {
@@ -191,13 +241,23 @@ class RunWord2Vec extends AbstractRun {
         // val ordering = Ordering.by[(String, Double( data => data._2)
         val words = realVocab.map{ case (word, index) =>
           {
-            val vectr =  bWordEmbeddings.value.get( word )
+            val vectr =  bWordEmbeddings.value( word )
             val bVectr = new breeze.linalg.DenseVector[ Double ] (bWordEmbeddings.value( word ).toArray)
-            val dist = ( bCluster dot bVectr ) / ( bClusterLength * breeze.linalg.norm( bVectr ))
+            var dist = 0.0
+            if ( isEuclidian ) {
+              dist =  org.apache.spark.ml.linalg.Vectors.sqdist( cluster, vectr)
+            } else {
+              dist = ( bCluster dot bVectr ) / ( bClusterLength * breeze.linalg.norm( bVectr ))
+            }
             ( index, word, dist )  
           }
         }
-        val synonyms:scala.collection.mutable.WrappedArray[(Int, String, Double)] = words.sortWith( _._3 > _._3).take(top)
+        var synonyms:scala.collection.mutable.WrappedArray[(Int, String, Double)] = null
+        if ( isEuclidian ) {
+          synonyms = words.sortWith( _._3 < _._3).take(top)
+        } else {
+          synonyms = words.sortWith( _._3 > _._3).take(top)
+        } 
         /*
          .foreach(synonym => print(
            " %s (%5.3f),"

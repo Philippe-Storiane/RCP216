@@ -46,24 +46,11 @@ class RunLDA extends AbstractRun {
   }
   
   
-  def computeKMeans( docDF: org.apache.spark.sql.DataFrame, nbClusters: Int) = {
-    val nbIterations = 1000
-       val kmeans = new org.apache.spark.ml.clustering.KMeans()
-      .setK( nbClusters )
-      .setMaxIter( nbIterations)
-      .setFeaturesCol("topicDistribution")
-      .setInitMode("k-means||")
-      .setPredictionCol("topic")
-      
-      val kmeansModel = kmeans.fit( docDF )
-      val kmeanParagraphs = kmeansModel.transform( docDF )
-      ( kmeanParagraphs, kmeansModel)
-  }
 
   def computeLDA( docDF: org.apache.spark.sql.DataFrame, nbClusters: Int) = {
     var maxIterations = 500
-    var docConcentration = -1
-    var topicConcentration = -1
+    var docConcentration = -1.0
+    var topicConcentration = -1.0
     var optimizer = "online"
     var seed = 1L
     var prop = System.getProperty("rcp216.lda.maxIterations")
@@ -72,11 +59,11 @@ class RunLDA extends AbstractRun {
     }
     prop = System.getProperty("rcp216.lda.topicConcentration")
     if ( prop != null ) {
-      topicConcentration = prop.toInt
+      topicConcentration = prop.toDouble
     }
     prop = System.getProperty("rcp216.lda.docConcentration")
     if ( prop != null ) {
-      docConcentration = prop.toInt
+      docConcentration = prop.toDouble
     }
     prop = System.getProperty("rcp216.lda.seed")
     if ( prop != null ) {
@@ -147,8 +134,101 @@ class RunLDA extends AbstractRun {
       saveTopicWords("lda-topicWords-tst.csv", topicWords)
   }
    
+ def analyzeFeaturedCluster( nbCluster:Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession) = {
+     val top = 10 
+     val contentExtractor = new ContentExtractor()
+     var paragraphs = contentExtractor.extractContent(sc)
+     var ( paragraphsDF, vocab )  = contentExtractor.extractDataFrame( paragraphs, sc, spark)
+    
+     val ( ldaParagraphs, ldaModel ) = computeLDA(  paragraphsDF, 200 )
  
+     val ( kmeansParagraphs, kmeanModel ) = computeKMeans( ldaParagraphs, nbCluster)
+     val featuredTerms = ldaModel.describeTopics( vocab.size).collect()
+     var isCos2Distance = false
+     val prop = System.getProperty("rcp216.lda.kmeans.distance")
+     if ( "cos2".equals( prop) ) {
+       isCos2Distance = true
+     }
+     val topicWords = kmeanModel.clusterCenters.zipWithIndex.map{
+          { case ( cluster, clusterIndex )  => {
+              println("cluster " + clusterIndex)
+              val clusterArray = cluster.toArray
+              var clusterLength = clusterArray.foldLeft( 0.0){
+                (map: Double, feature:Double) => {
+                  map + ( feature * feature)
+                }
+              }
+              clusterLength = math.sqrt( clusterLength)
+              val wordsDistance = vocab.zipWithIndex.map {
+                case ( word, wordIndex) => {
+                  var distance = 0.0
+                  var wordLength = 0.0
+                  clusterArray.zipWithIndex.foreach{
+                    case ( clusterFeatureValue, clusterFeatureIndex) => {
+                      val featureIndex = featuredTerms( clusterFeatureIndex ).getInt(0)
+                      if ( featureIndex != clusterFeatureIndex) {
+                        println("WARNING: Feature wrong index")
+                      }
+                      val wordFeatureIndexes = featuredTerms( clusterFeatureIndex ).getAs[scala.collection.mutable.WrappedArray[Int]](1)
+                      val wordFeatureValues = featuredTerms( clusterFeatureIndex ).getAs[scala.collection.mutable.WrappedArray[Double]](2)
+                      val wordFeatureIndex = wordFeatureIndexes.indexOf( wordIndex )
+                      val wordFeatureValue = wordFeatureValues( wordFeatureIndex)
+                      wordLength += ( wordFeatureValue * wordFeatureValue )
+                      distance += ( clusterFeatureValue * wordFeatureValue)
+                      
+                    }
+                  }
+                  wordLength = math.sqrt( wordLength )
+                  (wordIndex, word, distance /  ( wordLength * clusterLength ) )                  
+                }
+              }
+              val topWordDistance = wordsDistance.sortWith( _._3 > _._3).take(top)
+              val topWords:scala.collection.mutable.WrappedArray[(Int, String, Double)] = topWordDistance
+              ( clusterIndex, topWords)
+            }
+          }
+      }
+     saveTopicWords("lda-featured-topicWords-tst.csv", topicWords)
+
+ } 
   
+    def computeKMeans(
+      ldaParagraphs: org.apache.spark.sql.DataFrame, 
+      nbClusters:Int ) = {
+     
+
+        
+      var nbIterations = 1000
+      var initSteps = 2
+      var seed = new org.apache.spark.ml.clustering.KMeans().getSeed
+      var scaling = false
+      var prop = System.getProperty("rcp216.lsa.kmeans.nbIterations")
+      if ( prop != null ) {
+        nbIterations = prop.toInt
+      }
+      prop = System.getProperty("rcp216.lsa.kmeans.initSteps")
+      if ( prop != null ) {
+        initSteps = prop.toInt
+      }
+      prop = System.getProperty("rcp216.lsa.kmeans.seed")
+      if ( prop != null ) {
+        seed = prop.toLong
+      }
+      val kmeans = new org.apache.spark.ml.clustering.KMeans()
+        .setK( nbClusters )
+        .setMaxIter( nbIterations)
+        .setInitSteps( initSteps )
+        .setFeaturesCol( "topicDistribution" )
+        .setSeed( seed )
+        .setInitMode("k-means||")
+        .setPredictionCol("featureTopic")
+      
+      val kmeansModel = kmeans.fit( ldaParagraphs )
+      val kmeanParagraphs = kmeansModel.transform( ldaParagraphs )
+      ( kmeanParagraphs, kmeansModel)
+    } 
+    
+
   def saveMeasures( path: String, measures : Array[ (Int, Double, Double, Double, Double, Double) ]) = {
     val ps = new java.io.PrintStream(new java.io.FileOutputStream(path))
     ps.println("topic\tlogLikehood\tlogPerplexity\twsse\tword2vect\tUMass")
