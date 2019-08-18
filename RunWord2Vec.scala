@@ -58,6 +58,32 @@ class RunWord2Vec extends AbstractRun {
     findTopicMap( kmeansModel, 5, sentence2vec)
   }
   
+  def analyzeRawCluster( nbCluster:Int, sc:org.apache.spark.SparkContext, spark: org.apache.spark.sql.SparkSession) = {
+    val contentExtractor = new ContentExtractor()
+    var paragraphs = contentExtractor.extractContent(sc)
+    var ( paragraphsDF, vocab )  = contentExtractor.extractDataFrame( paragraphs, sc, spark)
+    val sentence = paragraphsDF.map( row => {
+        val tf = row.getAs[org.apache.spark.ml.linalg.SparseVector]("tf")
+        val idf = row.getAs[org.apache.spark.ml.linalg.SparseVector]("idf")
+        val bTf = contentExtractor.sparseSparkToBreeze( tf )
+        val bIdf = contentExtractor.sparseSparkToBreeze( idf )
+        val numActive = bTf.sum
+        val btf_idf = ( bTf *:* bIdf ) :*= ( 1.0 / numActive)
+        contentExtractor.sparseBreezeToSpark( btf_idf) 
+      }
+    ) (org.apache.spark.sql.catalyst.encoders.ExpressionEncoder(): org.apache.spark.sql.Encoder[ org.apache.spark.ml.linalg.Vector ])
+    val ( kmeansParagraphs, kmeansModel ) = computeKMeans(  sentence, nbCluster, sc, spark )
+    
+    val topicWords = kmeansModel.clusterCenters.zipWithIndex.map{
+      case ( clusterCenter, index ) => {
+        val arr = clusterCenter.toArray.zipWithIndex.sortBy(-_._1).take(10).map( v => ( v._2, vocab(v._2), v._1))
+        val highest:scala.collection.mutable.WrappedArray[(Int, String, Double)] = arr
+        ( index, highest)
+      }
+    }
+    saveTopicWords("word2vec-raw-topicWords-tst.csv", topicWords)
+    //findTopicMap( kmeansModel, 5, sentence2vec)
+  }
   
   def findTopicMap( kmeansModel: org.apache.spark.ml.clustering.KMeansModel, top: Int, sentence2vec:org.apache.spark.sql.Dataset[org.apache.spark.ml.linalg.Vector]) = {
     val isEuclidian:Boolean = isEuclidianDistance()

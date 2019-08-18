@@ -39,7 +39,7 @@ class ContentExtractor extends Serializable {
   
   def sparseBreezeToSpark( breezeSparse: breeze.linalg.SparseVector[Double]) = {
     breezeSparse.array.compact
-    org.apache.spark.mllib.linalg.Vectors.sparse(breezeSparse.size, breezeSparse.array.index, breezeSparse.array.data)
+    org.apache.spark.ml.linalg.Vectors.sparse(breezeSparse.size, breezeSparse.array.index, breezeSparse.array.data)
   }
   
   

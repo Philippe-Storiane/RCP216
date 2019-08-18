@@ -153,16 +153,9 @@ class RunLDA extends AbstractRun {
           { case ( cluster, clusterIndex )  => {
               println("cluster " + clusterIndex)
               val clusterArray = cluster.toArray
-              var clusterLength = clusterArray.foldLeft( 0.0){
-                (map: Double, feature:Double) => {
-                  map + ( feature * feature)
-                }
-              }
-              clusterLength = math.sqrt( clusterLength)
               val wordsDistance = vocab.zipWithIndex.map {
                 case ( word, wordIndex) => {
                   var distance = 0.0
-                  var wordLength = 0.0
                   clusterArray.zipWithIndex.foreach{
                     case ( clusterFeatureValue, clusterFeatureIndex) => {
                       val featureIndex = featuredTerms( clusterFeatureIndex ).getInt(0)
@@ -173,16 +166,16 @@ class RunLDA extends AbstractRun {
                       val wordFeatureValues = featuredTerms( clusterFeatureIndex ).getAs[scala.collection.mutable.WrappedArray[Double]](2)
                       val wordFeatureIndex = wordFeatureIndexes.indexOf( wordIndex )
                       val wordFeatureValue = wordFeatureValues( wordFeatureIndex)
-                      wordLength += ( wordFeatureValue * wordFeatureValue )
-                      distance += ( clusterFeatureValue * wordFeatureValue)
-                      
+                      distance += wordFeatureValue * math.log( 2 * wordFeatureValue) -
+                        wordFeatureValue * math.log( wordFeatureValue + clusterFeatureValue) +
+                        clusterFeatureValue * math.log( 2 * clusterFeatureValue) -
+                        clusterFeatureValue * math.log( wordFeatureValue + clusterFeatureValue) 
                     }
                   }
-                  wordLength = math.sqrt( wordLength )
-                  (wordIndex, word, distance /  ( wordLength * clusterLength ) )                  
+                  (wordIndex, word, distance  )                  
                 }
               }
-              val topWordDistance = wordsDistance.sortWith( _._3 > _._3).take(top)
+              val topWordDistance = wordsDistance.sortWith( _._3 < _._3).take(top)
               val topWords:scala.collection.mutable.WrappedArray[(Int, String, Double)] = topWordDistance
               ( clusterIndex, topWords)
             }
@@ -202,15 +195,15 @@ class RunLDA extends AbstractRun {
       var initSteps = 2
       var seed = new org.apache.spark.ml.clustering.KMeans().getSeed
       var scaling = false
-      var prop = System.getProperty("rcp216.lsa.kmeans.nbIterations")
+      var prop = System.getProperty("rcp216.lda.kmeans.nbIterations")
       if ( prop != null ) {
         nbIterations = prop.toInt
       }
-      prop = System.getProperty("rcp216.lsa.kmeans.initSteps")
+      prop = System.getProperty("rcp216.lda.kmeans.initSteps")
       if ( prop != null ) {
         initSteps = prop.toInt
       }
-      prop = System.getProperty("rcp216.lsa.kmeans.seed")
+      prop = System.getProperty("rcp216.lda.kmeans.seed")
       if ( prop != null ) {
         seed = prop.toLong
       }

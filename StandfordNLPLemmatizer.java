@@ -28,6 +28,7 @@ import java.util.*;
 public class StandfordNLPLemmatizer {
 
 	static String text = "On nous faisait, Arbate, un fidèle rapport:";
+
 	
 	public static HashSet<String> initStopPos() {
 		HashSet<String> stopPos = new HashSet<String>();
@@ -42,7 +43,19 @@ public class StandfordNLPLemmatizer {
 		stopPos.add("csu");
 		stopPos.add("adv");
 		stopPos.add("coo");
+		//
+		//stopPos.add("adj");
+		stopPos.add("pri");
 		return stopPos;
+	}
+	
+	public static HashSet<String> initSentenceEnd() {
+		HashSet<String> sentenceEnd = new HashSet<String>();
+		sentenceEnd.add( ".");
+		sentenceEnd.add("...");
+		sentenceEnd.add("?");
+		sentenceEnd.add("!");
+		return sentenceEnd;		
 	}
 	
 	
@@ -169,6 +182,7 @@ public class StandfordNLPLemmatizer {
         	Set<String> unknownLemmas = new HashSet<String>();
         	HashMap<String, String> stanfordTags = initStanfordTags();
         	HashSet<String> stopPos = initStopPos();
+        	HashSet<String> sentenceEnd = initSentenceEnd();
           // HashSet<String> posTags = new HashSet<String>();
         	int wordIndex = 0;
         	int lemmaError = 0;
@@ -191,6 +205,9 @@ public class StandfordNLPLemmatizer {
             			String token = stanfordTags.get( tags.get( index ));
             			if ( stopPos.contains( token ) ) {
             				stopPosWriter.println(token + "," + sample);
+            				if ( token.equals("puncts") && sentenceEnd.contains(sample )) {
+            					lemmatizedTextWriter.println("");
+            				}
             				continue;
             			}
             			if ( rawText.toUpperCase().equals(rawText )) {
