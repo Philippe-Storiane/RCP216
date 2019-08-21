@@ -10,6 +10,9 @@ import org.apache.spark.mllib.linalg.{Vector, Vectors, SingularValueDecompositio
 import org.apache.spark.mllib.linalg.distributed.RowMatrix
 import org.apache.spark.rdd.RDD
 
+import breeze.linalg.{DenseMatrix => BDenseMatrix, DenseVector => BDenseVector,
+SparseVector => BSparseVector}
+
 
 import org.apache.spark.ml.feature.StopWordsRemover
 
@@ -68,6 +71,19 @@ class RunLSA extends AbstractRun {
     println("vocabulary size: " + vocabulary.length)
     val (termDocMatrix, termIds, docIds, idfs) = termDocumentMatrix( doc, stopWords, vocabulary.length, sc)
     
+    val normalizer = new org.apache.spark.mllib.feature.Normalizer
+    val normalizedTermDocMatrix = normalizer.transform( termDocMatrix)
+
+    
+    val rawKMeansModel = computeKMeans( normalizedTermDocMatrix, nbClusters)
+    val rawTopicWords = rawKMeansModel.clusterCenters.zipWithIndex.map{
+      case ( clusterCenter, index ) => {
+        val arr = clusterCenter.toArray.zipWithIndex.sortBy(-_._1).take(10).map( v => ( v._2, termIds(v._2), v._1))
+        val highest:scala.collection.mutable.WrappedArray[(Int, String, Double)] = arr
+        ( index, highest)
+      }
+    }
+    saveTopicWords("lsa-raw-topicWords-tst.csv", rawTopicWords)
     var k = 200
     val mat = new org.apache.spark.mllib.linalg.distributed.RowMatrix(termDocMatrix)
     val svd = mat.computeSVD(k , computeU=true)
@@ -75,9 +91,86 @@ class RunLSA extends AbstractRun {
     
     val topicWords = findTopicWords(svd, nbClusters, 10, termIds)
     saveTopicWords( "lsa-topicWords-tst.csv", topicWords)
+    
+    val documentMatrix = multiplyByDiagonalMatrix( svd.U, svd.s)
+    val normalizedDocumentMatrix = rowsNormalized( documentMatrix )
+    val svdKMeansModel = computeKMeans( normalizedDocumentMatrix.rows, nbClusters)
+    
+    val wordMatrix = multiplyByDiagonalMatrix( svd.V, svd.s)
+    val normalizedWordMatrix = rowsNormalized( wordMatrix )
+    val bNormalizedWordMatrix = new BDenseMatrix[Double](
+        normalizedWordMatrix.rows,
+        normalizedWordMatrix.cols,
+        normalizedWordMatrix.toArray)
+    val svdTopicWords = svdKMeansModel.clusterCenters.zipWithIndex.map{
+      case ( cluster, index) => {
+        var bCluster = BDenseVector[Double]( normalizer.transform(cluster).toArray )
+        val value = bNormalizedWordMatrix * bCluster
+        val weights = value.toArray.zipWithIndex.sortBy(-_._1).take(10).map( v => (v._2, termIds( v._2), v._1))
+        val highest:scala.collection.mutable.WrappedArray[(Int, String, Double)] = weights
+        ( index, highest)
+
+      }
+    }
+    saveTopicWords( "lsa-svd-topicWords-tst.csv", svdTopicWords)
     findTopicMap( svd, 10, termDocMatrix)
     // val topConceptDocs = topDocsInTopConcepts(svd, nbClusters, 10, docIds)
   }
+  
+  def computeKMeans( data:RDD[ Vector ], nbClusters: Int ) = {
+    var nbIterations = 1000
+    var initSteps = 2
+    var seed = new org.apache.spark.ml.clustering.KMeans().getSeed
+    var scaling = false
+    var inputCol = "value"
+    var prop = System.getProperty("rcp216.lsa.nbIterations")
+    if ( prop != null ) {
+      nbIterations = prop.toInt
+    }
+    prop = System.getProperty("rcp216.lsa.initSteps")
+    if ( prop != null ) {
+      initSteps = prop.toInt
+    }
+    prop = System.getProperty("rcp216.lsa.initSteps")
+    if ( prop != null ) {
+      initSteps = prop.toInt
+    }
+    prop = System.getProperty("rcp216.lsa.seed")
+    if ( prop != null ) {
+      seed = prop.toLong
+    }
+
+    val kmeans = new org.apache.spark.mllib.clustering.KMeans()
+      .setK( nbClusters )
+      .setSeed( seed )
+      .setMaxIterations(nbIterations)
+      .setInitializationSteps(initSteps)
+      .setInitializationMode("k-means||")
+   kmeans.run( data )
+  }
+
+    /**
+   * Selects a row from a matrix.
+   */
+  def row(mat: BDenseMatrix[Double], index: Int): Seq[Double] = {
+    (0 until mat.cols).map(c => mat(index, c))
+  }
+
+  /**
+   * Selects a row from a matrix.
+   */
+  def row(mat: Matrix, index: Int): Seq[Double] = {
+    val arr = mat.toArray
+    (0 until mat.numCols).map(i => arr(index + i * mat.numRows))
+  }
+
+  /**
+   * Selects a row from a distributed matrix.
+   */
+  def row(mat: RowMatrix, id: Long): Array[Double] = {
+    mat.rows.zipWithUniqueId.map(_.swap).lookup(id).head.toArray
+  }
+
   
   def findTopicWords( svd:org.apache.spark.mllib.linalg.SingularValueDecomposition[org.apache.spark.mllib.linalg.distributed.RowMatrix, org.apache.spark.mllib.linalg.Matrix],
       nbClusters:Int,
@@ -196,6 +289,49 @@ class RunLSA extends AbstractRun {
     : Map[String, Double] = {
     docFreqs.map{ case (term, count) => (term, math.log( ( numDocs.toDouble + 1 ) / ( count + 1 ) ))}.toMap
   }
+
+  
+  def multiplyByDiagonalMatrix(mat: Matrix, diag: Vector): BDenseMatrix[Double] = {
+    val sArr = diag.toArray
+    new BDenseMatrix[Double](mat.numRows, mat.numCols, mat.toArray)
+      .mapPairs{case ((r, c), v) => v * sArr(c)}
+  }
+
+  
+   /**
+   * Finds the product of a distributed matrix and a diagonal matrix represented by a vector.
+   */
+  def multiplyByDiagonalMatrix(mat: RowMatrix, diag: Vector): RowMatrix = {
+    val sArr = diag.toArray
+    new RowMatrix(mat.rows.map(vec => {
+      val vecArr = vec.toArray
+      val newArr = (0 until vec.size).toArray.map(i => vecArr(i) * sArr(i))
+      Vectors.dense(newArr)
+    }))
+  }
+  
+  
+   def rowsNormalized(mat: BDenseMatrix[Double]): BDenseMatrix[Double] = {
+    val newMat = new BDenseMatrix[Double](mat.rows, mat.cols)
+    for (r <- 0 until mat.rows) {
+      val length = math.sqrt((0 until mat.cols).map(c => mat(r, c) * mat(r, c)).sum)
+      (0 until mat.cols).map(c => newMat.update(r, c, mat(r, c) / length))
+    }
+    newMat
+  }
+   
+  
+    /**
+   * Returns a distributed matrix where each row is divided by its length.
+   */
+  def rowsNormalized(mat: RowMatrix): RowMatrix = {
+    new RowMatrix(mat.rows.map(vec => {
+      val length = math.sqrt(vec.toArray.map(x => x * x).sum)
+      Vectors.dense(vec.toArray.map(_ / length))
+    }))
+  }
+
+   
 
   def saveDocFreqs(path: String, docFreqs: Array[(String, Int)]) {
     val ps = new java.io.PrintStream(new java.io.FileOutputStream(path))
