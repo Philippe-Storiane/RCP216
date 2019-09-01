@@ -1,4 +1,4 @@
-package com.rcp216.racineTopic
+package com.cnam.rcp216.racineTopic
 
 object CoherenceMeasure {
   
@@ -98,7 +98,7 @@ object CoherenceMeasure {
   def uMass( topicTopWords: Array[ ( Int, Array[Int] ) ], corpusPMI: breeze.linalg.CSCMatrix[Double] )= {
     val topicNumber = topicTopWords.length
     val vocabSize = java.lang.Math.sqrt( corpusPMI.size)
-    val combination_top_word = Range(0,10).combinations(2).size
+    //val combination_top_word = Range(0,10).combinations(2).size
     var eta = 1.0
     var prop = System.getProperty("rcp216.umass.eta")
     if ( prop != null ) {
@@ -109,16 +109,16 @@ object CoherenceMeasure {
         val termIndices = topic._2
         val wordsLength = topic._2.length
         var measure = 0.0        
-        for ( j <- Range(1, wordsLength)) {
-          val wj = termIndices( j )
-          for( i <- Range(0, j - 1)) {
-            val wi = termIndices( i )
+        for ( i <- Range(1, wordsLength )) {
+          val wi = termIndices( i )
+          for( j <- Range(0 , i  )) {
+            val wj = termIndices( j )
             val pwi_j = corpusPMI(wi, wj) + eta
             val pwj= corpusPMI( wj, wj)
             measure = measure + java.lang.Math.log( pwi_j) - java.lang.Math.log( pwj )
           }
         }
-        ( topicIndex, measure / ( wordsLength * combination_top_word ))
+        ( topicIndex, measure / ( wordsLength * ( wordsLength - 1) ))
       }
     )
     result

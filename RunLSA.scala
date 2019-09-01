@@ -1,6 +1,6 @@
 
 
-package com.rcp216.racineTopic
+package com.cnam.rcp216.racineTopic
 
 import org.apache.spark.SparkContext
 import org.apache.spark.SparkContext._
@@ -335,6 +335,7 @@ class RunLSA extends AbstractRun {
 
   def saveDocFreqs(path: String, docFreqs: Array[(String, Int)]) {
     val ps = new java.io.PrintStream(new java.io.FileOutputStream(path))
+    ps.println("word\tfreq")
     for ((doc, freq) <- docFreqs) {
       ps.println(s"$doc\t$freq")
     }
@@ -343,6 +344,7 @@ class RunLSA extends AbstractRun {
   
   def saveEigenvalues( path: String, svd: org.apache.spark.mllib.linalg.SingularValueDecomposition[org.apache.spark.mllib.linalg.distributed.RowMatrix, org.apache.spark.mllib.linalg.Matrix]) = {
     val ps = new java.io.PrintStream(new java.io.FileOutputStream(path))
+    ps.println("eigenvalue")
     svd.s.toArray.map( value => {
         ps.println( value)
       }

@@ -1,4 +1,4 @@
-package com.rcp216.racineTopic
+package com.cnam.rcp216.racineTopic
 
 import org.apache.spark.SparkContext
 
@@ -21,7 +21,7 @@ class RunWord2Vec extends AbstractRun {
     val contentExtractor = new ContentExtractor()
     var paragraphs = contentExtractor.extractContent(sc)
     var ( paragraphsDF, vocab )  = contentExtractor.extractDataFrame( paragraphs, sc, spark)
-    val sentence = paragraphsDF.select("tf","idf")
+    val sentence = paragraphsDF.select("filtered", "tf","idf")
     val bWordEmbeddings = CoherenceMeasure.loadWordEmbeddings(sc)
     val sentence2vec = extractWord2Vec( sentence, vocab, bWordEmbeddings, sc, spark)
     val corpusPMI = CoherenceMeasure.preprocessUMass( paragraphsDF, vocab.length )
@@ -62,6 +62,18 @@ class RunWord2Vec extends AbstractRun {
     val contentExtractor = new ContentExtractor()
     var paragraphs = contentExtractor.extractContent(sc)
     var ( paragraphsDF, vocab )  = contentExtractor.extractDataFrame( paragraphs, sc, spark)
+    /*
+    val tfIdfCompute = org.apache.spark.sql.functions.udf( (tf : org.apache.spark.ml.linalg.SparseVector,
+                             idf : org.apache.spark.ml.linalg.SparseVector) => { 
+        val bTf = contentExtractor.sparseSparkToBreeze( tf )
+        val bIdf = contentExtractor.sparseSparkToBreeze( idf )
+        val numActive = bTf.sum
+        val btf_idf = ( bTf *:* bIdf ) :*= ( 1.0 / numActive)
+        contentExtractor.sparseBreezeToSpark( btf_idf) 
+        }
+      )
+    val paragraphTfIdf = paragraphsDF.withColumn( "tfIdf", tfIdfCompute(org.apache.spark.sql.functions.col("tf"), org.apache.spark.sql.functions.col("tf")))
+    */
     val sentence = paragraphsDF.map( row => {
         val tf = row.getAs[org.apache.spark.ml.linalg.SparseVector]("tf")
         val idf = row.getAs[org.apache.spark.ml.linalg.SparseVector]("idf")

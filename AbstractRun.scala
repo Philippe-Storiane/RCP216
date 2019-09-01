@@ -1,4 +1,4 @@
-package com.rcp216.racineTopic
+package com.cnam.rcp216.racineTopic
 
 abstract class AbstractRun extends Serializable{
   
