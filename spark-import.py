@@ -15,23 +15,49 @@ import os
 
 os.chdir("C:/users/a179415/OneDrive - Alliance/Personal/CNAM/RCP 216")
 
-lsa_eigen_values = "lsaEigenValues.csv"
-data = pd.read_csv( lsa_eigen_values,header = None)
-plt.plot( data)
+rawTopic2Topic=[
+        (0,"Malheur"),
+        (0,"Malheur"),
+        (1, "Pouvoir"),
+        (2, "Bonheur"),
+        (-1,"Unknown"),
+        (3,"Religion"),
+        (4,"Danger"),
+        (5,"Triomphe"),
+        (3,"Religion"),
+        (-1,"Unknown"),
+        (-1,"Unknown"),
+        (6, "Trouble"),
+        (7, "Ombre vs Lumière"),
+        (-1,"Unknown"),
+        (8, "Peur"),
+        (9, "Malheure")
+        (-1,"Unknown")        
+        ]
+lsa_eigen_values = pd.read_csv( "lsa-eigenValues.csv" )
+lsa_eigen_values.plot()
 
 ## Fréquence des mots dans les documents
-data2= pd.read_csv("docfreqs.tsv", sep='\t' , encoding='latin1', header = None)
-plt.hist(data2.iloc[:,1], range=[0,25], bins=20)
+docfreqs= pd.read_csv("docfreqs.tsv", sep='\t' , encoding='latin1')
+docfreqs.hist( range=[0,25], bins=20)
 
 
 word2vec = pd.read_csv("word2vec-measures-tst.csv", sep='\t' , encoding='latin1')
-word2vec.plot(x="topic", y="UMass")
-
+word2vec.plot(x="topic", y="UMass", title="word2vec")
+word2vec_UMass = word2vec.plot(x="topic", y="UMass", title="kMeans sur word2vec")
+word2vec_UMass.axvline(x=11.08, linestyle="--", color="black")
+word2vec_UMass.text( x=5, y = -0.54, s="11 topics", bbox=dict(boxstyle="round", fc="white",ec="grey"))
 lda = pd.read_csv("lda-measures-tst.csv", sep='\t' , encoding='latin1')
 
 lsa = pd.read_csv("lsa-measures-tst.csv", sep='\t' , encoding='latin1')
-lsa.plot(x="topic", y="UMass")
-lsa.plot(x="topic", y="word2vect")
+lsa_UMass = lsa.plot(x="topic", y="UMass",title="lsa", marker="o")
+lsa_UMass.axvline(x=11.08, linestyle="--", color="black")
+lsa_UMass.text( x=5, y = -0.54, s="11 topics", bbox=dict(boxstyle="round", fc="white",ec="grey"))
+
+lsa_word2vec = lsa.plot(x="topic", y="word2vect",title="lsa", marker="o")
+lsa_word2vec.axvline(x=15.922, linestyle="--", color="black")
+lsa_word2vec.text( x=10, y = 0.01895, s="16 topics", bbox=dict(boxstyle="round", fc="white",ec="grey"))
+
 
 
 
