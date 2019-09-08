@@ -32,7 +32,7 @@ rawTopic2Topic=[
         (-1, "Unknown"),
         (6,"Peur"),
         (7, "Tragédie"),
-        (8, "Guerre"),
+        (8, "Pouvoir"),
         (9, "Divin")
         ]
 lsa_eigen_values = pd.read_csv( "lsa-eigenValues.csv" )
@@ -44,7 +44,7 @@ docfreqs.hist( range=[0,25], bins=20)
 
 
 word2vec = pd.read_csv("word2vec-measures-tst.csv", sep='\t' , encoding='latin1')
-word2vec.plot(x="topic", y="UMass", title="word2vec")
+word2vec.plot(x="topic", y="UMass", title="word2vec",marker="o")
 word2vec_UMass = word2vec.plot(x="topic", y="UMass", title="kMeans sur word2vec")
 word2vec_UMass.axvline(x=11.08, linestyle="--", color="black")
 word2vec_UMass.text( x=5, y = -0.54, s="11 topics", bbox=dict(boxstyle="round", fc="white",ec="grey"))
@@ -56,10 +56,12 @@ lsa_UMass.axvline(x=11.08, linestyle="--", color="black")
 lsa_UMass.text( x=5, y = -0.54, s="11 topics", bbox=dict(boxstyle="round", fc="white",ec="grey"))
 
 lsa_word2vec = lsa.plot(x="topic", y="word2vect",title="lsa", marker="o")
-lsa_word2vec.axvline(x=15.922, linestyle="--", color="black")
-lsa_word2vec.text( x=10, y = 0.01895, s="16 topics", bbox=dict(boxstyle="round", fc="white",ec="grey"))
+lsa_word2vec.axvline(x=17, linestyle="--", color="black")
+lsa_word2vec.text( x=18, y = 0.0255, s="17 topics", bbox=dict(boxstyle="round", fc="white",ec="grey"))
 
 
+lda = pd.read_csv("lda-measures-tst.csv", sep='\t' , encoding='latin1')
+lda_UMass = lda.plot(x="topic", y="UMass",title="lda", marker="o")
 
 
 ldaLogit = pd.read_csv("lda-log.csv", sep='\t' , encoding='latin1')
@@ -140,6 +142,7 @@ WIDTH=40
 
 
 topicImage = np.zeros((topicMap.shape[0] , WIDTH), dtype='int32')
+topic_max_index = topicMap.shape[0]
 for index, document in topicMap.iterrows():
     max_index = 1
     # min = document["topic_weight_1"] * 0.1
@@ -152,7 +155,7 @@ for index, document in topicMap.iterrows():
         real_topic_index = rawTopic2Topic[raw_topic_index][0]
         real_topic_label = rawTopic2Topic[raw_topic_index][1]        
         raw_topic_weight = document["topic_weight_" + str( i ) ]
-        if ( real_topic_index != -1 ) and ( not ( real_topic_index in realTopics)):            
+        if  ( not ( real_topic_index in realTopics)):            
             realTopics.append( real_topic_index )
             sum = sum + raw_topic_weight 
             if len( realTopics) == MAX_TOPIC:
@@ -162,28 +165,33 @@ for index, document in topicMap.iterrows():
 
     realTopics = []
     topicPixelSize = []
+    max_topic_weight = document["topic_weight_1" ]
     for i in range(1, max_index):
         raw_topic_index = int(document["topic_index_" + str( i ) ])
         real_topic_index = rawTopic2Topic[raw_topic_index][0]
         real_topic_label = rawTopic2Topic[raw_topic_index][1]
         raw_topic_weight = document["topic_weight_" + str( i ) ]
         if ( sum != 0):            
-            if ( real_topic_index != -1 ) and ( not ( real_topic_index in realTopics)):                
+            if  ( not ( real_topic_index in realTopics)):                
                 realTopics.append( real_topic_index)
-                additional_pixel = int(( WIDTH * 1.0) * ( raw_topic_weight / sum))
+                additional_pixel = int(( WIDTH * max_topic_weight) * ( raw_topic_weight / sum))
                 topicPixelSize.append(( real_topic_index, additional_pixel))
                 print("Index " + str( real_topic_index) + " pixel " + str(additional_pixel))
     current_pixel = 0
+    real_index = topic_max_index - index - 1
     for topic_index, additional_pixel in sorted(topicPixelSize, key=itemgetter(0)):
-        topicImage[ index , current_pixel: current_pixel + additional_pixel] =  topic_index
+        if  topic_index != -1:
+            topicImage[ real_index , current_pixel: current_pixel + additional_pixel] =  topic_index
+        else:
+            topicImage[ real_index , current_pixel: current_pixel + additional_pixel] =  REAL_TOPIC_NB
         current_pixel += additional_pixel
-    topicImage[ index, current_pixel: WIDTH ] = REAL_TOPIC_NB + 1
+    topicImage[ real_index, current_pixel: WIDTH ] = REAL_TOPIC_NB + 2
 fig, axs = plt.subplots(figsize=(9, 9), constrained_layout=True)
 # fig.suptitle("Plain Topic through pcolormesh")
 axs.set_axis_off()
 documentAx = fig.add_subplot(121)
 documentAx.set_axis_off()
-documentAx.pcolormesh(topicImage[0:10,0:WIDTH], vmin=0, vmax=REAL_TOPIC_NB + 1, rasterized=True, cmap=colorMap) #, shading='gouraud')
+documentAx.pcolormesh(topicImage, vmin=0, vmax=REAL_TOPIC_NB + 2, rasterized=True, cmap=colorMap) #, shading='gouraud')
 legendAx = fig.add_subplot(624)
 legendAx.set_axis_off()
 legendAx.legend( pictures, labels,ncol=1, loc='center right')
