@@ -17,23 +17,23 @@ import os
 os.chdir("C:/users/a179415/OneDrive - Alliance/Personal/CNAM/RCP 216")
 
 rawTopic2Topic=[
-        (0,"Malheur"),
-        (0,"Malheur"),
-        (1, "Liens familiaux"),
-        (-1, "Unknown"),
+        (0,"Liens familiaux"),
         (-1,"Unknown"),
-        (2,"Jugement"),
+        (1, "Divin"),
+        (2, "Pouvoir"),
+        (3,"Victoire"),
         (-1,"Unknown"),
         (-1,"Unknown"),
-        (3,"Danger"),
-        (4,"Mort"),
-        (5,"Bonheur"),
+        (4,"Bonheur"),
+        (5,"Malheur"),
+        (6,"Jugement"),
         (-1,"Unknown"),        
-        (-1, "Unknown"),
-        (6,"Peur"),
-        (7, "Tragédie"),
-        (8, "Pouvoir"),
-        (9, "Divin")
+        (5, "Malheur"),
+        (7,"Trahison"),
+        (-1, "Inconnu"),
+        (-1, "Inconnu"),
+        (8, "Vengeance"),
+        (-1, "Unknown")
         ]
 lsa_eigen_values = pd.read_csv( "lsa-eigenValues.csv" )
 lsa_eigen_values.plot()
